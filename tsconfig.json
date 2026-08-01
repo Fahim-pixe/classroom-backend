@@ -7,6 +7,8 @@
     /* Node ESM */
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
 
     /* Project structure */
     "rootDir": "src",

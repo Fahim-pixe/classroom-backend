@@ -4,6 +4,9 @@ import cors from "cors";
 
 const app = express();
 const PORT = 8000;
+if (!process.env.FRONTEND_URL) {
+    console.warn("FRONTEND_URL is not defined in .env file. Defaulting to http://localhost:5173");
+}
 
 app.use(cors({
     origin: process.env.FRONTEND_URL || "http://localhost:5173",

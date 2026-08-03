@@ -31,8 +31,16 @@ router.get("/", async (req, res) => {
     }
 
     if (department) {
-      const deptPattern = `%${String(department).replace(/[%_]/g, '\\$&')}%`;
-      filterConditions.push(ilike(departments.name, deptPattern));
+      const departmentId = Number(department);
+
+      if (!Number.isNaN(departmentId)) {
+    // Exact match for numeric department ID
+        filterConditions.push(eq(subjects.departmentId, departmentId));
+      } else {
+    // Text search fallback for department name or code
+        const deptPattern = `%${String(department).replace(/[%_]/g, '\\$&')}%`;
+        filterConditions.push(ilike(departments.name, deptPattern));
+      }
     }
 
     const whereClause = filterConditions.length > 0 ? and(...filterConditions) : undefined;

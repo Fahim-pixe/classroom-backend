@@ -18,7 +18,11 @@
     "node": ">=19.0.0"
   },
   "dependencies": {
+    "@arcjet/inspect": "^1.9.1",
+    "@arcjet/node": "^1.9.1",
     "@neondatabase/serverless": "^1.1.0",
+    "apminsight": "^5.5.1",
+    "better-auth": "^1.6.25",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
@@ -33,6 +37,8 @@
     "typescript": "^7.0.2"
   },
   "allowScripts": {
-    "esbuild@0.28.1": true
+    "esbuild@0.28.1": true,
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true
   }
 }

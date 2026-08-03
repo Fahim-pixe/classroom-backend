@@ -6,15 +6,15 @@ import cors from "cors";
 import express from "express";
 import { toNodeHandler } from "better-auth/node";
 
-import subjectsRouter from "./routes/subjects.ts";
-import usersRouter from "./routes/users.ts";
-import classesRouter from "./routes/classes.ts";
-import departmentsRouter from "./routes/departments.ts";
-import statsRouter from "./routes/stats.ts";
-import enrollmentsRouter from "./routes/enrollments.ts";
+import subjectsRouter from "./routes/subjects.js";
+import usersRouter from "./routes/users.js";
+import classesRouter from "./routes/classes.js";
+import departmentsRouter from "./routes/departments.js";
+import statsRouter from "./routes/stats.js";
+import enrollmentsRouter from "./routes/enrollments.js";
 
 // import securityMiddleware from "./middleware/security.ts";
-import { auth } from "./lib/auth.ts";
+import { auth } from "./lib/auth.js";
 
 const app = express();
 const PORT = 8000;

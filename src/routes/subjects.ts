@@ -1,7 +1,7 @@
 import express from "express";
-import { departments, subjects } from "../db/schema/index.ts";
+import { departments, subjects } from "../db/schema/index.js";
 import { and, ilike, or } from "drizzle-orm/sql/expressions/conditions";
-import { db } from "../db/index.ts";
+import { db } from "../db/index.js";
 import { sql } from "drizzle-orm/sql/sql";
 import { desc, eq, getTableColumns } from "drizzle-orm";
 

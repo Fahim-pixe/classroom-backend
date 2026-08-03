@@ -2,7 +2,7 @@ import express from "express";
 import { and, eq, getTableColumns } from "drizzle-orm";
 
 import { db } from "../db/index.js";
-import { classes, departments, enrollments, subjects, user } from "../db/schema/index.ts";
+import { classes, departments, enrollments, subjects, user } from "../db/schema/index.js";
 
 const router = express.Router();
 

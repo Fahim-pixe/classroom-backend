@@ -32,7 +32,7 @@ const getAllowedOrigins = (): string[] => {
     .map((origin) => origin.trim().replace(/\/$/, ""));
 };
 
-// CORS configuration (app.use handles all HTTP methods including OPTIONS preflight)
+// CORS configuration
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -55,7 +55,7 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 
 app.use(express.json());
 
-// API Routes
+// Standard /api prefixed routes
 app.use("/api/subjects", subjectsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/classes", classesRouter);
@@ -63,8 +63,13 @@ app.use("/api/departments", departmentsRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/enrollments", enrollmentsRouter);
 
-// Direct route aliases
+// Root-level route aliases (Fixes 404 errors when Refine hits root paths directly)
+app.use("/subjects", subjectsRouter);
 app.use("/users", usersRouter);
+app.use("/classes", classesRouter);
+app.use("/departments", departmentsRouter);
+app.use("/stats", statsRouter);
+app.use("/enrollments", enrollmentsRouter);
 
 app.get("/", (req, res) => {
   res.send("Backend server is running!");

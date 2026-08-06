@@ -2,6 +2,7 @@ import express from "express";
 import { and, desc, eq, ilike, or, sql, getTableColumns } from "drizzle-orm";
 
 import { db } from "../db/index.js";
+import { requireAuth } from "../middleware/auth.js";
 import { classes, departments, enrollments, subjects, user } from "../db/schema/index.js";
 
 const router = express.Router();
@@ -78,6 +79,60 @@ router.get("/:id", async (req, res) => {
   } catch (error) {
     console.error("GET /users/:id error:", error);
     res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
+
+// Update the signed-in user's editable profile fields.
+router.put("/:id", requireAuth, async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    if (!userId) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+
+    if (req.user?.id !== userId) {
+      return res.status(403).json({ error: "You can only update your own profile" });
+    }
+
+    const { name, image, imageCldPubId } = req.body ?? {};
+    const normalizedName = typeof name === "string" ? name.trim() : "";
+
+    if (normalizedName.length < 2 || normalizedName.length > 120) {
+      return res.status(400).json({ error: "Name must be between 2 and 120 characters" });
+    }
+
+    if (image !== null && image !== undefined && typeof image !== "string") {
+      return res.status(400).json({ error: "Image must be a URL or null" });
+    }
+
+    if (
+      imageCldPubId !== null &&
+      imageCldPubId !== undefined &&
+      typeof imageCldPubId !== "string"
+    ) {
+      return res.status(400).json({ error: "Image public id must be a string or null" });
+    }
+
+    const [updatedUser] = await db
+      .update(user)
+      .set({
+        name: normalizedName,
+        image: image ?? null,
+        imageCldPubId: imageCldPubId ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(user.id, userId))
+      .returning();
+
+    if (!updatedUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.status(200).json({ data: updatedUser });
+  } catch (error) {
+    console.error("PUT /users/:id error:", error);
+    return res.status(500).json({ error: "Failed to update profile" });
   }
 });
 

@@ -9,7 +9,7 @@ const router = express.Router();
 // Get all classes with optional search, subject, teacher filters, and pagination
 router.get("/", async (req, res) => {
   try {
-    const { search, subject, teacher, page = 1, limit = 10 } = req.query;
+    const { search, subject, teacher, teacherId, page = 1, limit = 10 } = req.query;
 
     const parsedPage = Number(page);
     const parsedLimit = Number(limit);
@@ -38,6 +38,10 @@ router.get("/", async (req, res) => {
 
     if (teacher) {
       filterConditions.push(ilike(user.name, `%${teacher}%`));
+    }
+
+    if (teacherId) {
+      filterConditions.push(eq(classes.teacherId, String(teacherId)));
     }
 
     const whereClause =

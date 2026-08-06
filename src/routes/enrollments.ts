@@ -36,35 +36,39 @@ const getEnrollmentDetails = async (enrollmentId: number) => {
 router.post("/", async (req, res) => {
   try {
     const { classId, studentId } = req.body;
-    if (!classId || !studentId) return res.status(400).json({ error: "classId and studentId are required" });
+    const parsedClassId = Number(classId);
+    if (!Number.isInteger(parsedClassId) || parsedClassId <= 0 || typeof studentId !== "string" || !studentId.trim()) {
+      return res.status(400).json({ error: "A valid classId and studentId are required" });
+    }
 
     // Use a database transaction to prevent race conditions
     const createdEnrollmentId = await db.transaction(async (tx) => {
-      const [classRecord] = await tx.select().from(classes).where(eq(classes.id, classId));
+      const [classRecord] = await tx.select().from(classes).where(eq(classes.id, parsedClassId));
       if (!classRecord) throw new Error("Class not found");
+      if (classRecord.status !== "active") throw new Error("Class is not active");
 
-      const [student] = await tx.select().from(user).where(eq(user.id, studentId));
+      const [student] = await tx.select().from(user).where(eq(user.id, studentId.trim()));
       if (!student) throw new Error("Student not found");
 
       const [existingEnrollment] = await tx
         .select({ id: enrollments.id })
         .from(enrollments)
-        .where(and(eq(enrollments.classId, classId), eq(enrollments.studentId, studentId)));
+        .where(and(eq(enrollments.classId, parsedClassId), eq(enrollments.studentId, studentId.trim())));
       if (existingEnrollment) throw new Error("Student already enrolled");
 
       // Enforce Capacity
       const [currentEnrollments] = await tx
         .select({ count: sql<number>`count(*)` })
         .from(enrollments)
-        .where(eq(enrollments.classId, classId));
+        .where(eq(enrollments.classId, parsedClassId));
       
-      if ((currentEnrollments?.count ?? 0) >= classRecord.capacity) {
+      if (classRecord.capacity <= 0 || Number(currentEnrollments?.count ?? 0) >= classRecord.capacity) {
         throw new Error("Class is at full capacity");
       }
 
       const [newEnrollment] = await tx
         .insert(enrollments)
-        .values({ classId, studentId })
+        .values({ classId: parsedClassId, studentId: studentId.trim() })
         .returning({ id: enrollments.id });
 
       // TypeScript safety check
@@ -88,19 +92,23 @@ router.post("/", async (req, res) => {
 router.post("/join", async (req, res) => {
   try {
     const { inviteCode, studentId } = req.body;
-    if (!inviteCode || !studentId) return res.status(400).json({ error: "inviteCode and studentId are required" });
+    const normalizedInviteCode = typeof inviteCode === "string" ? inviteCode.trim() : "";
+    if (!normalizedInviteCode || typeof studentId !== "string" || !studentId.trim()) {
+      return res.status(400).json({ error: "A valid inviteCode and studentId are required" });
+    }
 
     const createdEnrollmentId = await db.transaction(async (tx) => {
-      const [classRecord] = await tx.select().from(classes).where(eq(classes.inviteCode, inviteCode));
+      const [classRecord] = await tx.select().from(classes).where(eq(classes.inviteCode, normalizedInviteCode));
       if (!classRecord) throw new Error("Class not found");
+      if (classRecord.status !== "active") throw new Error("Class is not active");
 
-      const [student] = await tx.select().from(user).where(eq(user.id, studentId));
+      const [student] = await tx.select().from(user).where(eq(user.id, studentId.trim()));
       if (!student) throw new Error("Student not found");
 
       const [existingEnrollment] = await tx
         .select({ id: enrollments.id })
         .from(enrollments)
-        .where(and(eq(enrollments.classId, classRecord.id), eq(enrollments.studentId, studentId)));
+        .where(and(eq(enrollments.classId, classRecord.id), eq(enrollments.studentId, studentId.trim())));
       if (existingEnrollment) throw new Error("Student already enrolled");
 
       // Enforce Capacity
@@ -109,13 +117,13 @@ router.post("/join", async (req, res) => {
         .from(enrollments)
         .where(eq(enrollments.classId, classRecord.id));
       
-      if ((currentEnrollments?.count ?? 0) >= classRecord.capacity) {
+      if (classRecord.capacity <= 0 || Number(currentEnrollments?.count ?? 0) >= classRecord.capacity) {
         throw new Error("Class is at full capacity");
       }
 
       const [newEnrollment] = await tx
         .insert(enrollments)
-        .values({ classId: classRecord.id, studentId })
+        .values({ classId: classRecord.id, studentId: studentId.trim() })
         .returning({ id: enrollments.id });
 
       // TypeScript safety check

@@ -1,6 +1,6 @@
 import express from "express";
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
-import { requireRole } from "../middleware/auth.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { classes, departments, enrollments, subjects, user } from "../db/schema/index.js";
 
@@ -89,7 +89,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.post("/", requireRole(["admin", "teacher"]), async (req, res) => {
+router.post("/", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   try { // <-- MISSING TRY BLOCK ADDED HERE
     const {
       name,
@@ -275,7 +275,7 @@ router.get("/:id/users", async (req, res) => {
 });
 
 // UPDATE a class
-router.put("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+router.put("/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   try {
     const classId = Number(req.params.id);
     if (!Number.isFinite(classId)) return res.status(400).json({ error: "Invalid class id" });
@@ -301,7 +301,7 @@ router.put("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
 });
 
 // DELETE a class
-router.delete("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+router.delete("/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   try {
     const classId = Number(req.params.id);
     if (!Number.isFinite(classId)) return res.status(400).json({ error: "Invalid class id" });

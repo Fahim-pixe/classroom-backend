@@ -1,6 +1,6 @@
 import express from "express";
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
-import { requireRole } from "../middleware/auth.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import {
   classes,
@@ -70,7 +70,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.post("/", requireRole(["admin", "teacher"]), async (req, res) => {
+router.post("/", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   try {
     const { code, name, description } = req.body;
     
@@ -361,7 +361,8 @@ router.get("/:id/users", async (req, res) => {
   }
 });
 
-router.put("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+// 2. Update the PUT route
+router.put("/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   try {
     const departmentId = Number(req.params.id);
     if (!Number.isFinite(departmentId)) return res.status(400).json({ error: "Invalid department id" });
@@ -382,8 +383,8 @@ router.put("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
   }
 });
 
-// Add DELETE route for removing departments
-router.delete("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+// 3. Update the DELETE route
+router.delete("/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   try {
     const departmentId = Number(req.params.id);
     if (!Number.isFinite(departmentId)) return res.status(400).json({ error: "Invalid department id" });

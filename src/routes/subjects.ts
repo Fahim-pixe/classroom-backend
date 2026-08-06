@@ -2,7 +2,7 @@ import express from "express";
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { departments, subjects } from "../db/schema/index.js";
-import { requireRole } from "../middleware/auth.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -87,7 +87,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST new subject
-router.post("/", requireRole(["admin", "teacher"]), async (req, res) => {
+router.post("/", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   try {
     const { name, code, description, departmentId } = req.body;
     
@@ -109,7 +109,7 @@ router.post("/", requireRole(["admin", "teacher"]), async (req, res) => {
 });
 
 // PUT update subject
-router.put("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+router.put("/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   try {
     const subjectId = Number(req.params.id);
     if (!Number.isFinite(subjectId)) return res.status(400).json({ error: "Invalid subject id" });
@@ -131,7 +131,7 @@ router.put("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
 });
 
 // DELETE subject
-router.delete("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+router.delete("/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   try {
     const subjectId = Number(req.params.id);
     if (!Number.isFinite(subjectId)) return res.status(400).json({ error: "Invalid subject id" });

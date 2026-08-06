@@ -1,11 +1,11 @@
+// express.d.ts
+import type { User } from "./db/schema/index.js";
+
 declare global {
   namespace Express {
     interface Request {
-      user?: {
-        role?: "admin" | "teacher" | "student";
-      };
+      user?: User;
     }
   }
 }
-
 export {};

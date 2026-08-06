@@ -5,7 +5,7 @@ import("apminsight")
 import cors from "cors";
 import express from "express";
 import { toNodeHandler } from "better-auth/node";
-
+import { requireAuth } from "./middleware/auth.js";
 import subjectsRouter from "./routes/subjects.js";
 import usersRouter from "./routes/users.js";
 import classesRouter from "./routes/classes.js";
@@ -63,6 +63,9 @@ app.use("/api/departments", departmentsRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/enrollments", enrollmentsRouter);
 
+app.use("/subjects", requireAuth, subjectsRouter);
+app.use("/users", requireAuth, usersRouter);
+app.use("/classes", requireAuth, classesRouter);
 // Root-level route aliases (Fixes 404 errors when Refine hits root paths directly)
 app.use("/subjects", subjectsRouter);
 app.use("/users", usersRouter);

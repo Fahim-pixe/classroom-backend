@@ -1,6 +1,6 @@
 import express from "express";
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
-
+import { requireRole } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { classes, departments, enrollments, subjects, user } from "../db/schema/index.js";
 
@@ -79,8 +79,8 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
-  try {
+router.post("/", requireRole(["admin", "teacher"]), async (req, res) => {
+  try { // <-- MISSING TRY BLOCK ADDED HERE
     const {
       name,
       teacherId,
@@ -90,7 +90,13 @@ router.post("/", async (req, res) => {
       status,
       bannerUrl,
       bannerCldPubId,
+      schedules, // <-- Extract schedules from the request
     } = req.body;
+
+    // Optional but highly recommended: Add basic validation here
+    if (!name || !teacherId || !subjectId) {
+       return res.status(400).json({ error: "Missing required fields" });
+    }
 
     const [createdClass] = await db
       .insert(classes)
@@ -103,14 +109,17 @@ router.post("/", async (req, res) => {
         bannerUrl,
         capacity,
         description,
-        schedules: [],
+        schedules: schedules || [], 
         status,
       })
       .returning({ id: classes.id });
 
-    if (!createdClass) throw Error;
-
+    if (!createdClass) {
+       return res.status(500).json({ error: "Failed to create class" });
+    }
+    
     res.status(201).json({ data: createdClass });
+
   } catch (error) {
     console.error("POST /classes error:", error);
     res.status(500).json({ error: "Failed to create class" });
@@ -246,6 +255,51 @@ router.get("/:id/users", async (req, res) => {
   } catch (error) {
     console.error("GET /classes/:id/users error:", error);
     res.status(500).json({ error: "Failed to fetch class users" });
+  }
+});
+
+// UPDATE a class
+router.put("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+  try {
+    const classId = Number(req.params.id);
+    if (!Number.isFinite(classId)) return res.status(400).json({ error: "Invalid class id" });
+
+    const {
+      name, teacherId, subjectId, capacity, description, status, bannerUrl, bannerCldPubId
+    } = req.body;
+
+    const [updatedClass] = await db
+      .update(classes)
+      .set({
+        name, teacherId, subjectId, capacity, description, status, bannerUrl, bannerCldPubId,
+      })
+      .where(eq(classes.id, classId))
+      .returning();
+
+    if (!updatedClass) return res.status(404).json({ error: "Class not found" });
+    res.status(200).json({ data: updatedClass });
+  } catch (error) {
+    console.error("PUT /classes/:id error:", error);
+    res.status(500).json({ error: "Failed to update class" });
+  }
+});
+
+// DELETE a class
+router.delete("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+  try {
+    const classId = Number(req.params.id);
+    if (!Number.isFinite(classId)) return res.status(400).json({ error: "Invalid class id" });
+
+    const [deletedClass] = await db
+      .delete(classes)
+      .where(eq(classes.id, classId))
+      .returning({ id: classes.id });
+
+    if (!deletedClass) return res.status(404).json({ error: "Class not found" });
+    res.status(200).json({ data: deletedClass, message: "Class deleted successfully" });
+  } catch (error) {
+    console.error("DELETE /classes/:id error:", error);
+    res.status(500).json({ error: "Failed to delete class" });
   }
 });
 

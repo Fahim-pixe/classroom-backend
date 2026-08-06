@@ -1,6 +1,6 @@
 import express from "express";
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
-
+import { requireRole } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import {
   classes,
@@ -70,17 +70,23 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", requireRole(["admin", "teacher"]), async (req, res) => {
   try {
     const { code, name, description } = req.body;
+    
+    if (!code || !name) {
+       return res.status(400).json({ error: "Missing required fields" });
+    }
 
     const [createdDepartment] = await db
       .insert(departments)
       .values({ code, name, description })
-      .returning({ id: departments.id });
+      .returning();
 
-    if (!createdDepartment) throw Error;
-
+    if (!createdDepartment) {
+       return res.status(500).json({ error: "Failed to create department" });
+    }
+    
     res.status(201).json({ data: createdDepartment });
   } catch (error) {
     console.error("POST /departments error:", error);
@@ -352,6 +358,46 @@ router.get("/:id/users", async (req, res) => {
   } catch (error) {
     console.error("GET /departments/:id/users error:", error);
     res.status(500).json({ error: "Failed to fetch department users" });
+  }
+});
+
+router.put("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+  try {
+    const departmentId = Number(req.params.id);
+    if (!Number.isFinite(departmentId)) return res.status(400).json({ error: "Invalid department id" });
+
+    const { code, name, description } = req.body;
+
+    const [updatedDepartment] = await db
+      .update(departments)
+      .set({ code, name, description })
+      .where(eq(departments.id, departmentId))
+      .returning();
+
+    if (!updatedDepartment) return res.status(404).json({ error: "Department not found" });
+    res.status(200).json({ data: updatedDepartment });
+  } catch (error) {
+    console.error("PUT /departments/:id error:", error);
+    res.status(500).json({ error: "Failed to update department" });
+  }
+});
+
+// Add DELETE route for removing departments
+router.delete("/:id", requireRole(["admin", "teacher"]), async (req, res) => {
+  try {
+    const departmentId = Number(req.params.id);
+    if (!Number.isFinite(departmentId)) return res.status(400).json({ error: "Invalid department id" });
+
+    const [deletedDepartment] = await db
+      .delete(departments)
+      .where(eq(departments.id, departmentId))
+      .returning({ id: departments.id });
+
+    if (!deletedDepartment) return res.status(404).json({ error: "Department not found" });
+    res.status(200).json({ data: deletedDepartment, message: "Department deleted successfully" });
+  } catch (error) {
+    console.error("DELETE /departments/:id error:", error);
+    res.status(500).json({ error: "Failed to delete department" });
   }
 });
 

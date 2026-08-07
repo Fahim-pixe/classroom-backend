@@ -79,6 +79,80 @@ export const classes = pgTable(
   })
 );
 
+export const resourceCategoryEnum = pgEnum("resource_category", [
+  "lecture_notes",
+  "videos",
+  "practice",
+  "references",
+  "syllabus",
+  "other",
+]);
+
+export const resources = pgTable(
+  "resources",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    classId: integer("class_id")
+      .notNull()
+      .references(() => classes.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    title: varchar("title", { length: 200 }).notNull(),
+    description: text("description"),
+    category: resourceCategoryEnum("category").notNull().default("other"),
+    resourceUrl: text("resource_url").notNull(),
+    mimeType: varchar("mime_type", { length: 120 }),
+    fileSizeBytes: integer("file_size_bytes"),
+    isPublished: boolean("is_published").notNull().default(true),
+    isArchived: boolean("is_archived").notNull().default(false),
+    ...timestamps,
+  },
+  (table) => ({
+    classIdIdx: index("resources_class_id_idx").on(table.classId),
+    ownerIdIdx: index("resources_owner_id_idx").on(table.ownerId),
+    categoryIdx: index("resources_category_idx").on(table.category),
+    publishedIdx: index("resources_published_idx").on(table.isPublished, table.isArchived),
+  })
+);
+
+export const resourceFavorites = pgTable(
+  "resource_favorites",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    resourceId: integer("resource_id")
+      .notNull()
+      .references(() => resources.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    ...timestamps,
+  },
+  (table) => ({
+    resourceUserUnique: uniqueIndex("resource_favorites_resource_user_unique").on(table.resourceId, table.userId),
+    userIdIdx: index("resource_favorites_user_id_idx").on(table.userId),
+  })
+);
+
+export const resourceViews = pgTable(
+  "resource_views",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    resourceId: integer("resource_id")
+      .notNull()
+      .references(() => resources.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    lastViewedAt: timestamp("last_viewed_at").defaultNow().notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    resourceUserUnique: uniqueIndex("resource_views_resource_user_unique").on(table.resourceId, table.userId),
+    userViewedIdx: index("resource_views_user_viewed_idx").on(table.userId, table.lastViewedAt),
+  })
+);
+
 export const announcements = pgTable(
   "announcements",
   {
@@ -300,6 +374,23 @@ export const submissionsRelations = relations(submissions, ({ one }) => ({
   }),
 }));
 
+export const resourcesRelations = relations(resources, ({ one, many }) => ({
+  class: one(classes, { fields: [resources.classId], references: [classes.id] }),
+  owner: one(user, { fields: [resources.ownerId], references: [user.id] }),
+  favorites: many(resourceFavorites),
+  views: many(resourceViews),
+}));
+
+export const resourceFavoritesRelations = relations(resourceFavorites, ({ one }) => ({
+  resource: one(resources, { fields: [resourceFavorites.resourceId], references: [resources.id] }),
+  user: one(user, { fields: [resourceFavorites.userId], references: [user.id] }),
+}));
+
+export const resourceViewsRelations = relations(resourceViews, ({ one }) => ({
+  resource: one(resources, { fields: [resourceViews.resourceId], references: [resources.id] }),
+  user: one(user, { fields: [resourceViews.userId], references: [user.id] }),
+}));
+
 export const announcementsRelations = relations(announcements, ({ one }) => ({
   class: one(classes, {
     fields: [announcements.classId],
@@ -347,6 +438,11 @@ export type NewSubject = typeof subjects.$inferInsert;
 
 export type Class = typeof classes.$inferSelect;
 export type NewClass = typeof classes.$inferInsert;
+
+export type Resource = typeof resources.$inferSelect;
+export type NewResource = typeof resources.$inferInsert;
+export type ResourceFavorite = typeof resourceFavorites.$inferSelect;
+export type ResourceView = typeof resourceViews.$inferSelect;
 
 export type Announcement = typeof announcements.$inferSelect;
 export type NewAnnouncement = typeof announcements.$inferInsert;

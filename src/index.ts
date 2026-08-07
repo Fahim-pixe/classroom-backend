@@ -16,6 +16,7 @@ import announcementsRouter from "./routes/announcements.js";
 import assignmentsRouter from "./routes/assignments.js";
 import attendanceRouter from "./routes/attendance.js";
 import gradebookRouter from "./routes/gradebook.js";
+import resourcesRouter from "./routes/resources.js";
 
 import { auth } from "./lib/auth.js";
 
@@ -70,6 +71,7 @@ app.use("/api/announcements", announcementsRouter);
 app.use("/api/assignments", assignmentsRouter);
 app.use("/api/attendance", attendanceRouter);
 app.use("/api/gradebook", gradebookRouter);
+app.use("/api/resources", resourcesRouter);
 
 app.use("/subjects", requireAuth, subjectsRouter);
 app.use("/users", requireAuth, usersRouter);
@@ -85,6 +87,7 @@ app.use("/announcements", announcementsRouter);
 app.use("/assignments", assignmentsRouter);
 app.use("/attendance", attendanceRouter);
 app.use("/gradebook", gradebookRouter);
+app.use("/resources", resourcesRouter);
 
 app.get("/", (req, res) => {
   res.send("Backend server is running!");

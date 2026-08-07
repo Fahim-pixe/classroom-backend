@@ -82,6 +82,43 @@ router.get("/", requireAuth, async (req, res) => {
   }
 });
 
+router.get("/:id", requireAuth, async (req, res) => {
+  try {
+    const assignmentId = parseId(req.params.id);
+    if (!assignmentId) return res.status(400).json({ error: "Invalid assignment id" });
+
+    const assignment = await getAssignment(assignmentId);
+    if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+
+    if (!req.user || !(await canAccessClass(assignment.classId, req.user.id, req.user.role))) {
+      return res.status(403).json({ error: "You do not have access to this assignment" });
+    }
+
+    const [details] = await db
+      .select({
+        id: assignments.id,
+        classId: assignments.classId,
+        authorId: assignments.authorId,
+        title: assignments.title,
+        description: assignments.description,
+        dueAt: assignments.dueAt,
+        maxPoints: assignments.maxPoints,
+        createdAt: assignments.createdAt,
+        updatedAt: assignments.updatedAt,
+        className: classes.name,
+      })
+      .from(assignments)
+      .innerJoin(classes, eq(classes.id, assignments.classId))
+      .where(eq(assignments.id, assignmentId))
+      .limit(1);
+
+    return res.json({ data: details });
+  } catch (error) {
+    console.error("GET /assignments/:id error:", error);
+    return res.status(500).json({ error: "Failed to fetch assignment details" });
+  }
+});
+
 router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res) => {
   try {
     const classId = parseId(req.body?.classId);

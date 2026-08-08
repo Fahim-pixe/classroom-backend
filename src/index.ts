@@ -19,17 +19,17 @@ import gradebookRouter from "./routes/gradebook.js";
 import resourcesRouter from "./routes/resources.js";
 
 import { auth } from "./lib/auth.js";
+import { API_PATHS, SERVER_CONFIG } from "./config/app.js";
 
 const app = express();
 
-const PORT = Number(process.env.PORT) || 8000;
+const PORT = SERVER_CONFIG.port;
 
 const getAllowedOrigins = (): string[] => {
   const origins = [
+    ...SERVER_CONFIG.allowedOrigins,
     process.env.FRONTEND_URL,
     process.env.BETTER_AUTH_URL,
-    "http://localhost:5173",
-    "http://localhost:3000",
   ];
 
   return origins
@@ -49,45 +49,45 @@ app.use(
       }
       return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    methods: SERVER_CONFIG.corsMethods,
+    allowedHeaders: SERVER_CONFIG.corsHeaders,
     credentials: true,
   })
 );
 
 // Better Auth Route
-app.all("/api/auth/*splat", toNodeHandler(auth));
+app.all(API_PATHS.auth, toNodeHandler(auth));
 
 app.use(express.json());
 
 // Standard /api prefixed routes
-app.use("/api/subjects", subjectsRouter);
-app.use("/api/users", usersRouter);
-app.use("/api/classes", classesRouter);
-app.use("/api/departments", departmentsRouter);
-app.use("/api/stats", statsRouter);
-app.use("/api/enrollments", enrollmentsRouter);
-app.use("/api/announcements", announcementsRouter);
-app.use("/api/assignments", assignmentsRouter);
-app.use("/api/attendance", attendanceRouter);
-app.use("/api/gradebook", gradebookRouter);
-app.use("/api/resources", resourcesRouter);
+app.use(API_PATHS.prefixed.subjects, subjectsRouter);
+app.use(API_PATHS.prefixed.users, usersRouter);
+app.use(API_PATHS.prefixed.classes, classesRouter);
+app.use(API_PATHS.prefixed.departments, departmentsRouter);
+app.use(API_PATHS.prefixed.stats, statsRouter);
+app.use(API_PATHS.prefixed.enrollments, enrollmentsRouter);
+app.use(API_PATHS.prefixed.announcements, announcementsRouter);
+app.use(API_PATHS.prefixed.assignments, assignmentsRouter);
+app.use(API_PATHS.prefixed.attendance, attendanceRouter);
+app.use(API_PATHS.prefixed.gradebook, gradebookRouter);
+app.use(API_PATHS.prefixed.resources, resourcesRouter);
 
-app.use("/subjects", requireAuth, subjectsRouter);
-app.use("/users", requireAuth, usersRouter);
-app.use("/classes", requireAuth, classesRouter);
+app.use(API_PATHS.root.subjects, requireAuth, subjectsRouter);
+app.use(API_PATHS.root.users, requireAuth, usersRouter);
+app.use(API_PATHS.root.classes, requireAuth, classesRouter);
 // Root-level route aliases (Fixes 404 errors when Refine hits root paths directly)
-app.use("/subjects", subjectsRouter);
-app.use("/users", usersRouter);
-app.use("/classes", classesRouter);
-app.use("/departments", departmentsRouter);
-app.use("/stats", statsRouter);
-app.use("/enrollments", enrollmentsRouter);
-app.use("/announcements", announcementsRouter);
-app.use("/assignments", assignmentsRouter);
-app.use("/attendance", attendanceRouter);
-app.use("/gradebook", gradebookRouter);
-app.use("/resources", resourcesRouter);
+app.use(API_PATHS.root.subjects, subjectsRouter);
+app.use(API_PATHS.root.users, usersRouter);
+app.use(API_PATHS.root.classes, classesRouter);
+app.use(API_PATHS.root.departments, departmentsRouter);
+app.use(API_PATHS.root.stats, statsRouter);
+app.use(API_PATHS.root.enrollments, enrollmentsRouter);
+app.use(API_PATHS.root.announcements, announcementsRouter);
+app.use(API_PATHS.root.assignments, assignmentsRouter);
+app.use(API_PATHS.root.attendance, attendanceRouter);
+app.use(API_PATHS.root.gradebook, gradebookRouter);
+app.use(API_PATHS.root.resources, resourcesRouter);
 
 app.get("/", (req, res) => {
   res.send("Backend server is running!");

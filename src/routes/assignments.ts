@@ -57,11 +57,19 @@ router.get("/", requireAuth, async (req, res) => {
         description: assignments.description,
         dueAt: assignments.dueAt,
         maxPoints: assignments.maxPoints,
+        attachmentUrl: assignments.attachmentUrl,
+        attachmentName: assignments.attachmentName,
+        attachmentMimeType: assignments.attachmentMimeType,
+        attachmentSizeBytes: assignments.attachmentSizeBytes,
         createdAt: assignments.createdAt,
         updatedAt: assignments.updatedAt,
         submission: {
           id: submissions.id,
           content: submissions.content,
+          attachmentUrl: submissions.attachmentUrl,
+          attachmentName: submissions.attachmentName,
+          attachmentMimeType: submissions.attachmentMimeType,
+          attachmentSizeBytes: submissions.attachmentSizeBytes,
           submittedAt: submissions.submittedAt,
           grade: submissions.grade,
           feedback: submissions.feedback,
@@ -103,6 +111,10 @@ router.get("/:id", requireAuth, async (req, res) => {
         description: assignments.description,
         dueAt: assignments.dueAt,
         maxPoints: assignments.maxPoints,
+        attachmentUrl: assignments.attachmentUrl,
+        attachmentName: assignments.attachmentName,
+        attachmentMimeType: assignments.attachmentMimeType,
+        attachmentSizeBytes: assignments.attachmentSizeBytes,
         createdAt: assignments.createdAt,
         updatedAt: assignments.updatedAt,
         className: classes.name,
@@ -126,6 +138,10 @@ router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res
     const description = textValue(req.body?.description, 10000);
     const maxPoints = Number(req.body?.maxPoints ?? 100);
     const dueAt = req.body?.dueAt ? new Date(req.body.dueAt) : null;
+    const attachmentUrl = textValue(req.body?.attachmentUrl, 2000) || null;
+    const attachmentName = textValue(req.body?.attachmentName, 255) || null;
+    const attachmentMimeType = textValue(req.body?.attachmentMimeType, 120) || null;
+    const attachmentSizeBytes = Number.isInteger(Number(req.body?.attachmentSizeBytes)) ? Number(req.body.attachmentSizeBytes) : null;
 
     if (!classId || !title || !description || !Number.isInteger(maxPoints) || maxPoints <= 0) {
       return res.status(400).json({ error: "classId, title, description, and positive maxPoints are required" });
@@ -137,7 +153,7 @@ router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res
 
     const [created] = await db
       .insert(assignments)
-      .values({ classId, authorId: req.user!.id, title, description, maxPoints, dueAt })
+      .values({ classId, authorId: req.user!.id, title, description, maxPoints, dueAt, attachmentUrl, attachmentName, attachmentMimeType, attachmentSizeBytes })
       .returning();
     return res.status(201).json({ data: created });
   } catch (error) {
@@ -150,6 +166,10 @@ router.post("/:id/submissions", requireAuth, requireRole(["student"]), async (re
   try {
     const assignmentId = parseId(req.params.id);
     const content = textValue(req.body?.content, 20000);
+    const attachmentUrl = textValue(req.body?.attachmentUrl, 2000) || null;
+    const attachmentName = textValue(req.body?.attachmentName, 255) || null;
+    const attachmentMimeType = textValue(req.body?.attachmentMimeType, 120) || null;
+    const attachmentSizeBytes = Number.isInteger(Number(req.body?.attachmentSizeBytes)) ? Number(req.body.attachmentSizeBytes) : null;
     if (!assignmentId || !content) return res.status(400).json({ error: "Assignment id and submission content are required" });
 
     const assignment = await getAssignment(assignmentId);
@@ -164,8 +184,8 @@ router.post("/:id/submissions", requireAuth, requireRole(["student"]), async (re
       .limit(1);
 
     const [saved] = existing
-      ? await db.update(submissions).set({ content, submittedAt: new Date(), updatedAt: new Date() }).where(eq(submissions.id, existing.id)).returning()
-      : await db.insert(submissions).values({ assignmentId, studentId: req.user!.id, content }).returning();
+      ? await db.update(submissions).set({ content, attachmentUrl, attachmentName, attachmentMimeType, attachmentSizeBytes, submittedAt: new Date(), updatedAt: new Date() }).where(eq(submissions.id, existing.id)).returning()
+      : await db.insert(submissions).values({ assignmentId, studentId: req.user!.id, content, attachmentUrl, attachmentName, attachmentMimeType, attachmentSizeBytes }).returning();
 
     return res.status(existing ? 200 : 201).json({ data: saved });
   } catch (error) {

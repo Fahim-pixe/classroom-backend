@@ -189,6 +189,10 @@ export const assignments = pgTable(
     description: text("description").notNull(),
     dueAt: timestamp("due_at"),
     maxPoints: integer("max_points").notNull().default(100),
+    attachmentUrl: text("attachment_url"),
+    attachmentName: varchar("attachment_name", { length: 255 }),
+    attachmentMimeType: varchar("attachment_mime_type", { length: 120 }),
+    attachmentSizeBytes: integer("attachment_size_bytes"),
 
     ...timestamps,
   },
@@ -209,6 +213,10 @@ export const submissions = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
+    attachmentUrl: text("attachment_url"),
+    attachmentName: varchar("attachment_name", { length: 255 }),
+    attachmentMimeType: varchar("attachment_mime_type", { length: 120 }),
+    attachmentSizeBytes: integer("attachment_size_bytes"),
     submittedAt: timestamp("submitted_at").defaultNow().notNull(),
     grade: integer("grade"),
     feedback: text("feedback"),

@@ -1,8 +1,10 @@
 import express from "express";
+import crypto from "node:crypto";
 import { and, desc, eq, getTableColumns, ilike, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { classes, enrollments, resourceFavorites, resources, resourceViews, subjects } from "../db/schema/index.js";
+import { CLOUDINARY_CONFIG } from "../config/app.js";
 
 const router = express.Router();
 
@@ -12,6 +14,28 @@ const accessibleClassCondition = (userId: string, role: string) =>
     : role === "teacher"
       ? eq(classes.teacherId, userId)
       : eq(enrollments.studentId, userId);
+
+router.post("/upload-signature", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  if (!CLOUDINARY_CONFIG.cloudName || !CLOUDINARY_CONFIG.apiKey || !CLOUDINARY_CONFIG.apiSecret) {
+    return res.status(503).json({ error: "Cloudinary uploads are not configured" });
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const folder = CLOUDINARY_CONFIG.uploadFolder;
+  const signaturePayload = `folder=${folder}&timestamp=${timestamp}${CLOUDINARY_CONFIG.apiSecret}`;
+  const signature = crypto.createHash("sha1").update(signaturePayload).digest("hex");
+
+  return res.json({
+    data: {
+      cloudName: CLOUDINARY_CONFIG.cloudName,
+      apiKey: CLOUDINARY_CONFIG.apiKey,
+      folder,
+      timestamp,
+      signature,
+      resourceType: "auto",
+    },
+  });
+});
 
 router.get("/", requireAuth, async (req, res) => {
   try {

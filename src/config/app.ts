@@ -12,6 +12,13 @@ export const SERVER_CONFIG = {
   corsHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
 };
 
+export const CLOUDINARY_CONFIG = {
+  cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? "",
+  apiKey: process.env.CLOUDINARY_API_KEY ?? "",
+  apiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
+  uploadFolder: process.env.CLOUDINARY_UPLOAD_FOLDER ?? "classroom/resources",
+};
+
 export const API_PATHS = {
   auth: "/api/auth/*splat",
   prefixed: {

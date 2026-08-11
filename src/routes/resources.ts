@@ -3,8 +3,8 @@ import crypto from "node:crypto";
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
-import { classes, enrollments, resourceFavorites, resources, resourceViews, subjects } from "../db/schema/index.js";
-import { CLOUDINARY_CONFIG, RESOURCE_LIST_CONFIG } from "../config/app.js";
+import { classes, enrollments, resourceFavorites, resources, resourceViews, storageAssets, subjects } from "../db/schema/index.js";
+import { CLOUDINARY_CONFIG, RESOURCE_LIST_CONFIG, STORAGE_CONFIG } from "../config/app.js";
 
 const router = express.Router();
 
@@ -16,6 +16,9 @@ const accessibleClassCondition = (userId: string, role: string) =>
       : eq(enrollments.studentId, userId);
 
 router.post("/upload-signature", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  if (STORAGE_CONFIG.featureFlags.supabaseWritesEnabled) {
+    return res.status(410).json({ error: "Cloudinary uploads are disabled after Supabase Storage cutover" });
+  }
   if (!CLOUDINARY_CONFIG.cloudName || !CLOUDINARY_CONFIG.apiKey || !CLOUDINARY_CONFIG.apiSecret) {
     return res.status(503).json({ error: "Cloudinary uploads are not configured" });
   }
@@ -104,15 +107,49 @@ router.get("/", requireAuth, async (req, res) => {
 
 router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res) => {
   try {
-    const { classId, title, description, category = "other", resourceUrl, mimeType, fileSizeBytes, isPublished = true } = req.body ?? {};
+    const { classId, title, description, category = "other", resourceUrl, storageAssetId, mimeType, fileSizeBytes, isPublished = true } = req.body ?? {};
     const parsedClassId = Number(classId);
-    if (!Number.isInteger(parsedClassId) || !title || !resourceUrl) {
-      return res.status(400).json({ error: "classId, title, and resourceUrl are required" });
+    const normalizedStorageAssetId = storageAssetId ? String(storageAssetId) : null;
+    const normalizedResourceUrl = resourceUrl ? String(resourceUrl).trim() : "";
+    if (!Number.isInteger(parsedClassId) || !title || (!normalizedResourceUrl && !normalizedStorageAssetId)) {
+      return res.status(400).json({ error: "classId, title, and either resourceUrl or storageAssetId are required" });
     }
     const [targetClass] = await db.select({ id: classes.id, teacherId: classes.teacherId }).from(classes).where(eq(classes.id, parsedClassId)).limit(1);
     if (!targetClass) return res.status(404).json({ error: "Class not found" });
     if (req.user!.role === "teacher" && targetClass.teacherId !== req.user!.id) return res.status(403).json({ error: "You can only add resources to your classes" });
-    const [created] = await db.insert(resources).values({ classId: parsedClassId, ownerId: req.user!.id, title: String(title).trim(), description: description ? String(description).trim() : null, category, resourceUrl: String(resourceUrl).trim(), mimeType: mimeType ? String(mimeType) : null, fileSizeBytes: Number.isInteger(Number(fileSizeBytes)) ? Number(fileSizeBytes) : null, isPublished: isPublished !== false }).returning();
+
+    let confirmedAsset: typeof storageAssets.$inferSelect | null = null;
+    if (normalizedStorageAssetId) {
+      const [asset] = await db.select().from(storageAssets).where(and(
+        eq(storageAssets.id, normalizedStorageAssetId),
+        eq(storageAssets.ownerId, req.user!.id),
+        eq(storageAssets.assetKind, "resource"),
+        eq(storageAssets.state, "active"),
+        eq(storageAssets.storageProvider, STORAGE_CONFIG.provider)
+      )).limit(1);
+      if (!asset || asset.classId !== parsedClassId) {
+        return res.status(422).json({ error: "The selected storage asset is not authorized for this class resource" });
+      }
+      confirmedAsset = asset;
+    }
+
+    const [created] = await db.insert(resources).values({
+      classId: parsedClassId,
+      ownerId: req.user!.id,
+      title: String(title).trim(),
+      description: description ? String(description).trim() : null,
+      category,
+      resourceUrl: confirmedAsset ? `storage-asset://${confirmedAsset.id}` : normalizedResourceUrl,
+      storageAssetId: confirmedAsset?.id ?? null,
+      mimeType: confirmedAsset?.mimeType ?? (mimeType ? String(mimeType) : null),
+      fileSizeBytes: confirmedAsset?.fileSizeBytes ?? (Number.isInteger(Number(fileSizeBytes)) ? Number(fileSizeBytes) : null),
+      isPublished: isPublished !== false,
+    }).returning();
+    if (created && confirmedAsset) {
+      await db.update(storageAssets)
+        .set({ entityType: "resource", entityId: String(created.id), updatedAt: new Date() })
+        .where(eq(storageAssets.id, confirmedAsset.id));
+    }
     return res.status(201).json({ data: created });
   } catch (error) {
     console.error("POST /resources error:", error);

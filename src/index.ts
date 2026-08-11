@@ -21,6 +21,7 @@ import attendanceRouter from "./routes/attendance.js";
 import gradebookRouter from "./routes/gradebook.js";
 import resourcesRouter from "./routes/resources.js";
 import calendarRouter from "./routes/calendar.js";
+import storageRouter from "./routes/storage.js";
 
 import { auth } from "./lib/auth.js";
 import { API_PATHS, SERVER_CONFIG } from "./config/app.js";
@@ -105,6 +106,7 @@ app.use(API_PATHS.prefixed.attendance, requireAuth, attendanceRouter);
 app.use(API_PATHS.prefixed.gradebook, requireAuth, gradebookRouter);
 app.use(API_PATHS.prefixed.resources, requireAuth, resourcesRouter);
 app.use(API_PATHS.prefixed.calendar, requireAuth, calendarRouter);
+app.use(API_PATHS.prefixed.storage, requireAuth, storageRouter);
 
 // Legacy root aliases remain available for existing clients but now enforce the same session boundary.
 app.use(API_PATHS.root.subjects, requireAuth, subjectsRouter);
@@ -119,6 +121,7 @@ app.use(API_PATHS.root.attendance, requireAuth, attendanceRouter);
 app.use(API_PATHS.root.gradebook, requireAuth, gradebookRouter);
 app.use(API_PATHS.root.resources, requireAuth, resourcesRouter);
 app.use(API_PATHS.root.calendar, requireAuth, calendarRouter);
+app.use(API_PATHS.root.storage, requireAuth, storageRouter);
 
 app.get("/", (req, res) => {
   res.send("Backend server is running!");

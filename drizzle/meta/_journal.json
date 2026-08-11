@@ -64,6 +64,13 @@
       "when": 1786484055296,
       "tag": "0008_vengeful_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786487324612,
+      "tag": "0009_nosy_legion",
+      "breakpoints": true
     }
   ]
 }

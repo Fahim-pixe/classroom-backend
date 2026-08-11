@@ -9,6 +9,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth.js";
@@ -50,6 +51,126 @@ export const subjects = pgTable("subjects", {
   ...timestamps,
 });
 
+export const storageProviderEnum = pgEnum("storage_provider", ["cloudinary", "supabase"]);
+export const storageAssetKindEnum = pgEnum("storage_asset_kind", [
+  "avatar",
+  "class_banner",
+  "resource",
+  "assignment_attachment",
+  "submission_attachment",
+]);
+export const storageVisibilityEnum = pgEnum("storage_visibility", ["private"]);
+export const storageAssetStateEnum = pgEnum("storage_asset_state", ["pending", "active", "archived", "deleted"]);
+export const storageMigrationStatusEnum = pgEnum("storage_migration_status", [
+  "not_required",
+  "pending",
+  "in_progress",
+  "migrated",
+  "verified",
+  "failed",
+  "skipped",
+]);
+export const storageVerificationStatusEnum = pgEnum("storage_verification_status", ["pending", "verified", "failed"]);
+export const storageUploadIntentStatusEnum = pgEnum("storage_upload_intent_status", ["pending", "completed", "expired", "cancelled"]);
+
+export const storageAssets = pgTable(
+  "storage_assets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    assetKind: storageAssetKindEnum("asset_kind").notNull(),
+    entityType: varchar("entity_type", { length: 80 }).notNull(),
+    entityId: text("entity_id"),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    classId: integer("class_id"),
+    subjectId: integer("subject_id"),
+    storageProvider: storageProviderEnum("storage_provider").notNull(),
+    bucket: varchar("bucket", { length: 120 }),
+    objectPath: text("object_path"),
+    sourceProvider: storageProviderEnum("source_provider"),
+    sourceIdentifier: text("source_identifier"),
+    sourceUrl: text("source_url"),
+    fileName: varchar("file_name", { length: 255 }).notNull(),
+    mimeType: varchar("mime_type", { length: 120 }),
+    fileSizeBytes: integer("file_size_bytes"),
+    checksumSha256: varchar("checksum_sha256", { length: 64 }),
+    visibility: storageVisibilityEnum("visibility").notNull().default("private"),
+    version: integer("version").notNull().default(1),
+    state: storageAssetStateEnum("state").notNull().default("pending"),
+    migrationStatus: storageMigrationStatusEnum("migration_status").notNull().default("not_required"),
+    verificationStatus: storageVerificationStatusEnum("verification_status").notNull().default("pending"),
+    verifiedAt: timestamp("verified_at"),
+    migrationAttempts: integer("migration_attempts").notNull().default(0),
+    lastError: text("last_error"),
+    replacedByAssetId: uuid("replaced_by_asset_id"),
+    deletedAt: timestamp("deleted_at"),
+    ...timestamps,
+  },
+  (table) => ({
+    entityIdx: index("storage_assets_entity_idx").on(table.entityType, table.entityId),
+    classIdx: index("storage_assets_class_idx").on(table.classId),
+    ownerIdx: index("storage_assets_owner_idx").on(table.ownerId),
+    providerPathUnique: uniqueIndex("storage_assets_provider_path_unique").on(table.storageProvider, table.bucket, table.objectPath),
+    migrationIdx: index("storage_assets_migration_idx").on(table.migrationStatus, table.verificationStatus),
+  })
+);
+
+export const storageUploadIntents = pgTable(
+  "storage_upload_intents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    assetKind: storageAssetKindEnum("asset_kind").notNull(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    classId: integer("class_id"),
+    entityType: varchar("entity_type", { length: 80 }).notNull(),
+    entityId: text("entity_id"),
+    bucket: varchar("bucket", { length: 120 }).notNull(),
+    objectPath: text("object_path").notNull().unique(),
+    fileName: varchar("file_name", { length: 255 }).notNull(),
+    requestedMimeType: varchar("requested_mime_type", { length: 120 }).notNull(),
+    requestedFileSizeBytes: integer("requested_file_size_bytes").notNull(),
+    status: storageUploadIntentStatusEnum("status").notNull().default("pending"),
+    expiresAt: timestamp("expires_at").notNull(),
+    completedAssetId: uuid("completed_asset_id").references(() => storageAssets.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (table) => ({
+    ownerStatusIdx: index("storage_upload_intents_owner_status_idx").on(table.ownerId, table.status),
+    expiresAtIdx: index("storage_upload_intents_expires_at_idx").on(table.expiresAt),
+  })
+);
+
+export const storageMigrationEvents = pgTable(
+  "storage_migration_events",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    assetId: uuid("asset_id").references(() => storageAssets.id, { onDelete: "cascade" }),
+    eventName: varchar("event_name", { length: 120 }).notNull(),
+    severity: varchar("severity", { length: 20 }).notNull().default("info"),
+    attempt: integer("attempt").notNull().default(0),
+    details: jsonb("details"),
+    ...timestamps,
+  },
+  (table) => ({
+    assetEventIdx: index("storage_migration_events_asset_event_idx").on(table.assetId, table.createdAt),
+    eventNameIdx: index("storage_migration_events_event_name_idx").on(table.eventName),
+  })
+);
+
+export const userStorageAssets = pgTable(
+  "user_storage_assets",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => user.id, { onDelete: "cascade" }),
+    avatarAssetId: uuid("avatar_asset_id").references(() => storageAssets.id, { onDelete: "set null" }),
+    ...timestamps,
+  }
+);
+
 export const classes = pgTable(
   "classes",
   {
@@ -66,6 +187,7 @@ export const classes = pgTable(
     name: varchar("name", { length: 255 }).notNull(),
     bannerCldPubId: text("banner_cld_pub_id"),
     bannerUrl: text("banner_url"),
+    bannerAssetId: uuid("banner_asset_id").references(() => storageAssets.id, { onDelete: "set null" }),
     capacity: integer("capacity").notNull().default(50),
     description: text("description"),
     status: classStatusEnum("status").notNull().default("active"),
@@ -102,6 +224,7 @@ export const resources = pgTable(
     description: text("description"),
     category: resourceCategoryEnum("category").notNull().default("other"),
     resourceUrl: text("resource_url").notNull(),
+    storageAssetId: uuid("storage_asset_id").references(() => storageAssets.id, { onDelete: "set null" }),
     mimeType: varchar("mime_type", { length: 120 }),
     fileSizeBytes: integer("file_size_bytes"),
     isPublished: boolean("is_published").notNull().default(true),
@@ -191,6 +314,7 @@ export const assignments = pgTable(
     dueAt: timestamp("due_at"),
     maxPoints: integer("max_points").notNull().default(100),
     attachmentUrl: text("attachment_url"),
+    attachmentAssetId: uuid("attachment_asset_id").references(() => storageAssets.id, { onDelete: "set null" }),
     attachmentName: varchar("attachment_name", { length: 255 }),
     attachmentMimeType: varchar("attachment_mime_type", { length: 120 }),
     attachmentSizeBytes: integer("attachment_size_bytes"),
@@ -215,6 +339,7 @@ export const submissions = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
     attachmentUrl: text("attachment_url"),
+    attachmentAssetId: uuid("attachment_asset_id").references(() => storageAssets.id, { onDelete: "set null" }),
     attachmentName: varchar("attachment_name", { length: 255 }),
     attachmentMimeType: varchar("attachment_mime_type", { length: 120 }),
     attachmentSizeBytes: integer("attachment_size_bytes"),

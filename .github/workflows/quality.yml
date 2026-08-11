@@ -42,5 +42,8 @@ jobs:
       - name: Type-safe production build
         run: npm run build
 
+      - name: Type-check storage migration tooling
+        run: npm run storage:check
+
       - name: Audit production dependency tree
         run: npm audit --omit=dev --audit-level=high

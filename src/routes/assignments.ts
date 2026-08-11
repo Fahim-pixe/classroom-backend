@@ -2,7 +2,8 @@ import express from "express";
 import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "../db/index.js";
-import { assignments, classes, enrollments, submissions, user } from "../db/schema/index.js";
+import { assignments, classes, enrollments, storageAssets, submissions, user } from "../db/schema/index.js";
+import { API_PATHS, STORAGE_CONFIG } from "../config/app.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -14,6 +15,37 @@ const parseId = (value: unknown) => {
 
 const textValue = (value: unknown, max: number) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
+
+const normalizeStorageAssetId = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
+
+const storageRedirectPath = (assetId: string) =>
+  `${API_PATHS.prefixed.storage}${STORAGE_CONFIG.routePaths.redirectByAssetId.replace(":assetId", assetId)}`;
+
+const getOwnedActiveAttachmentAsset = async ({
+  assetId,
+  ownerId,
+  assetKind,
+  classId,
+  expectedEntityId,
+}: {
+  assetId: string;
+  ownerId: string;
+  assetKind: "assignment_attachment" | "submission_attachment";
+  classId: number;
+  expectedEntityId?: string;
+}) => {
+  const [asset] = await db.select().from(storageAssets).where(and(
+    eq(storageAssets.id, assetId),
+    eq(storageAssets.ownerId, ownerId),
+    eq(storageAssets.assetKind, assetKind),
+    eq(storageAssets.classId, classId),
+    eq(storageAssets.state, "active"),
+    eq(storageAssets.storageProvider, STORAGE_CONFIG.provider),
+  )).limit(1);
+  if (!asset || (expectedEntityId && asset.entityId !== expectedEntityId)) return null;
+  return asset;
+};
 
 const getAssignment = async (id: number) => {
   const [assignment] = await db
@@ -61,6 +93,7 @@ router.get("/", requireAuth, async (req, res) => {
         attachmentName: assignments.attachmentName,
         attachmentMimeType: assignments.attachmentMimeType,
         attachmentSizeBytes: assignments.attachmentSizeBytes,
+        attachmentAssetId: assignments.attachmentAssetId,
         createdAt: assignments.createdAt,
         updatedAt: assignments.updatedAt,
         submission: {
@@ -70,6 +103,7 @@ router.get("/", requireAuth, async (req, res) => {
           attachmentName: submissions.attachmentName,
           attachmentMimeType: submissions.attachmentMimeType,
           attachmentSizeBytes: submissions.attachmentSizeBytes,
+          attachmentAssetId: submissions.attachmentAssetId,
           submittedAt: submissions.submittedAt,
           grade: submissions.grade,
           feedback: submissions.feedback,
@@ -115,6 +149,7 @@ router.get("/:id", requireAuth, async (req, res) => {
         attachmentName: assignments.attachmentName,
         attachmentMimeType: assignments.attachmentMimeType,
         attachmentSizeBytes: assignments.attachmentSizeBytes,
+        attachmentAssetId: assignments.attachmentAssetId,
         createdAt: assignments.createdAt,
         updatedAt: assignments.updatedAt,
         className: classes.name,
@@ -142,6 +177,7 @@ router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res
     const attachmentName = textValue(req.body?.attachmentName, 255) || null;
     const attachmentMimeType = textValue(req.body?.attachmentMimeType, 120) || null;
     const attachmentSizeBytes = Number.isInteger(Number(req.body?.attachmentSizeBytes)) ? Number(req.body.attachmentSizeBytes) : null;
+    const attachmentAssetId = normalizeStorageAssetId(req.body?.attachmentAssetId);
 
     if (!classId || !title || !description || !Number.isInteger(maxPoints) || maxPoints <= 0) {
       return res.status(400).json({ error: "classId, title, description, and positive maxPoints are required" });
@@ -151,10 +187,42 @@ router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res
       return res.status(403).json({ error: "You can only create assignments for your assigned classes" });
     }
 
+    const confirmedAttachment = attachmentAssetId
+      ? await getOwnedActiveAttachmentAsset({
+        assetId: attachmentAssetId,
+        ownerId: req.user!.id,
+        assetKind: "assignment_attachment",
+        classId,
+      })
+      : null;
+    if (attachmentAssetId && !confirmedAttachment) {
+      return res.status(422).json({ error: "The selected assignment attachment is not active or is not authorized for this class" });
+    }
+    if (STORAGE_CONFIG.featureFlags.supabaseWritesEnabled && !confirmedAttachment && attachmentUrl) {
+      return res.status(410).json({ error: "Direct assignment attachment URLs are disabled after Supabase Storage cutover" });
+    }
+
     const [created] = await db
       .insert(assignments)
-      .values({ classId, authorId: req.user!.id, title, description, maxPoints, dueAt, attachmentUrl, attachmentName, attachmentMimeType, attachmentSizeBytes })
+      .values({
+        classId,
+        authorId: req.user!.id,
+        title,
+        description,
+        maxPoints,
+        dueAt,
+        attachmentAssetId: confirmedAttachment?.id ?? null,
+        attachmentUrl: confirmedAttachment ? storageRedirectPath(confirmedAttachment.id) : attachmentUrl,
+        attachmentName: confirmedAttachment?.fileName ?? attachmentName,
+        attachmentMimeType: confirmedAttachment?.mimeType ?? attachmentMimeType,
+        attachmentSizeBytes: confirmedAttachment?.fileSizeBytes ?? attachmentSizeBytes,
+      })
       .returning();
+    if (created && confirmedAttachment) {
+      await db.update(storageAssets)
+        .set({ entityType: "assignment", entityId: String(created.id), updatedAt: new Date() })
+        .where(eq(storageAssets.id, confirmedAttachment.id));
+    }
     return res.status(201).json({ data: created });
   } catch (error) {
     console.error("POST /assignments error:", error);
@@ -170,11 +238,28 @@ router.post("/:id/submissions", requireAuth, requireRole(["student"]), async (re
     const attachmentName = textValue(req.body?.attachmentName, 255) || null;
     const attachmentMimeType = textValue(req.body?.attachmentMimeType, 120) || null;
     const attachmentSizeBytes = Number.isInteger(Number(req.body?.attachmentSizeBytes)) ? Number(req.body.attachmentSizeBytes) : null;
+    const attachmentAssetId = normalizeStorageAssetId(req.body?.attachmentAssetId);
     if (!assignmentId || !content) return res.status(400).json({ error: "Assignment id and submission content are required" });
 
     const assignment = await getAssignment(assignmentId);
     if (!assignment || !(await canAccessClass(assignment.classId, req.user!.id, "student"))) {
       return res.status(403).json({ error: "You cannot submit to this assignment" });
+    }
+
+    const confirmedAttachment = attachmentAssetId
+      ? await getOwnedActiveAttachmentAsset({
+        assetId: attachmentAssetId,
+        ownerId: req.user!.id,
+        assetKind: "submission_attachment",
+        classId: assignment.classId,
+        expectedEntityId: String(assignmentId),
+      })
+      : null;
+    if (attachmentAssetId && !confirmedAttachment) {
+      return res.status(422).json({ error: "The selected submission attachment is not active or is not authorized for this assignment" });
+    }
+    if (STORAGE_CONFIG.featureFlags.supabaseWritesEnabled && !confirmedAttachment && attachmentUrl) {
+      return res.status(410).json({ error: "Direct submission attachment URLs are disabled after Supabase Storage cutover" });
     }
 
     const [existing] = await db
@@ -184,8 +269,31 @@ router.post("/:id/submissions", requireAuth, requireRole(["student"]), async (re
       .limit(1);
 
     const [saved] = existing
-      ? await db.update(submissions).set({ content, attachmentUrl, attachmentName, attachmentMimeType, attachmentSizeBytes, submittedAt: new Date(), updatedAt: new Date() }).where(eq(submissions.id, existing.id)).returning()
-      : await db.insert(submissions).values({ assignmentId, studentId: req.user!.id, content, attachmentUrl, attachmentName, attachmentMimeType, attachmentSizeBytes }).returning();
+      ? await db.update(submissions).set({
+        content,
+        attachmentAssetId: confirmedAttachment?.id ?? null,
+        attachmentUrl: confirmedAttachment ? storageRedirectPath(confirmedAttachment.id) : attachmentUrl,
+        attachmentName: confirmedAttachment?.fileName ?? attachmentName,
+        attachmentMimeType: confirmedAttachment?.mimeType ?? attachmentMimeType,
+        attachmentSizeBytes: confirmedAttachment?.fileSizeBytes ?? attachmentSizeBytes,
+        submittedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(submissions.id, existing.id)).returning()
+      : await db.insert(submissions).values({
+        assignmentId,
+        studentId: req.user!.id,
+        content,
+        attachmentAssetId: confirmedAttachment?.id ?? null,
+        attachmentUrl: confirmedAttachment ? storageRedirectPath(confirmedAttachment.id) : attachmentUrl,
+        attachmentName: confirmedAttachment?.fileName ?? attachmentName,
+        attachmentMimeType: confirmedAttachment?.mimeType ?? attachmentMimeType,
+        attachmentSizeBytes: confirmedAttachment?.fileSizeBytes ?? attachmentSizeBytes,
+      }).returning();
+    if (saved && confirmedAttachment) {
+      await db.update(storageAssets)
+        .set({ entityType: "submission", entityId: String(saved.id), updatedAt: new Date() })
+        .where(eq(storageAssets.id, confirmedAttachment.id));
+    }
 
     return res.status(existing ? 200 : 201).json({ data: saved });
   } catch (error) {
@@ -212,6 +320,11 @@ router.get("/:id/submissions", requireAuth, async (req, res) => {
         submittedAt: submissions.submittedAt,
         grade: submissions.grade,
         feedback: submissions.feedback,
+        attachmentUrl: submissions.attachmentUrl,
+        attachmentName: submissions.attachmentName,
+        attachmentMimeType: submissions.attachmentMimeType,
+        attachmentSizeBytes: submissions.attachmentSizeBytes,
+        attachmentAssetId: submissions.attachmentAssetId,
         student: { id: user.id, name: user.name, email: user.email, image: user.image },
       })
       .from(submissions)

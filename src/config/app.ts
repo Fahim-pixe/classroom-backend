@@ -32,7 +32,101 @@ export const CLOUDINARY_CONFIG = {
   apiKey: process.env.CLOUDINARY_API_KEY ?? "",
   apiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
   uploadFolder: process.env.CLOUDINARY_UPLOAD_FOLDER ?? "classroom/resources",
-};
+  legacyReadEnabled: process.env.STORAGE_LEGACY_CLOUDINARY_READS_ENABLED !== "false",
+} as const;
+
+export const STORAGE_CONFIG = {
+  provider: "supabase",
+  featureFlags: {
+    supabaseWritesEnabled: process.env.STORAGE_SUPABASE_WRITES_ENABLED === "true",
+    legacyCloudinaryReadsEnabled: process.env.STORAGE_LEGACY_CLOUDINARY_READS_ENABLED !== "false",
+  },
+  supabase: {
+    url: process.env.SUPABASE_URL ?? "",
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+    buckets: {
+      avatars: process.env.SUPABASE_AVATARS_BUCKET ?? "avatars",
+      learningAssets: process.env.SUPABASE_LEARNING_ASSETS_BUCKET ?? "learning-assets",
+    },
+  },
+  routePaths: {
+    root: "/",
+    uploadIntents: "/upload-intents",
+    uploadIntentById: "/upload-intents/:intentId",
+    uploadIntentConfirm: "/upload-intents/:intentId/confirm",
+    uploadIntentCancel: "/upload-intents/:intentId/cancel",
+    accessByAssetId: "/assets/:assetId/access",
+    redirectByAssetId: "/assets/:assetId/redirect",
+  },
+  visibility: {
+    private: "private",
+  },
+  accessModes: {
+    preview: "preview",
+    download: "download",
+  },
+  signedUrlTtlSeconds: {
+    preview: Number(process.env.STORAGE_PREVIEW_URL_TTL_SECONDS ?? 300),
+    download: Number(process.env.STORAGE_DOWNLOAD_URL_TTL_SECONDS ?? 900),
+    uploadIntent: Number(process.env.STORAGE_UPLOAD_INTENT_TTL_SECONDS ?? 900),
+  },
+  uploads: {
+    standardUploadMaximumBytes: Number(process.env.STORAGE_STANDARD_UPLOAD_MAXIMUM_BYTES ?? 6 * 1024 * 1024),
+    maximumBytesByKind: {
+      avatar: Number(process.env.STORAGE_AVATAR_MAXIMUM_BYTES ?? 5 * 1024 * 1024),
+      classBanner: Number(process.env.STORAGE_CLASS_BANNER_MAXIMUM_BYTES ?? 8 * 1024 * 1024),
+      resource: Number(process.env.STORAGE_RESOURCE_MAXIMUM_BYTES ?? 50 * 1024 * 1024),
+      assignmentAttachment: Number(process.env.STORAGE_ASSIGNMENT_ATTACHMENT_MAXIMUM_BYTES ?? 25 * 1024 * 1024),
+      submissionAttachment: Number(process.env.STORAGE_SUBMISSION_ATTACHMENT_MAXIMUM_BYTES ?? 25 * 1024 * 1024),
+    },
+    allowedMimeTypesByKind: {
+      avatar: ["image/jpeg", "image/png", "image/webp"],
+      classBanner: ["image/jpeg", "image/png", "image/webp"],
+      resource: [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/plain",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+      ],
+      assignmentAttachment: [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text/plain",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+      ],
+      submissionAttachment: [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text/plain",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+      ],
+    },
+  },
+  objectPathPolicy: {
+    maximumFileNameLength: 96,
+    maximumVersion: 1000,
+    cacheControlSeconds: 3600,
+  },
+  migration: {
+    defaultBatchSize: 50,
+    maximumBatchSize: 200,
+    defaultConcurrency: 4,
+    maximumConcurrency: 10,
+    retryMaximumAttempts: 3,
+    retryBaseDelayMilliseconds: 500,
+    stabilizationWindowDays: Number(process.env.STORAGE_STABILIZATION_WINDOW_DAYS ?? 14),
+  },
+} as const;
 
 export const RESOURCE_LIST_CONFIG = {
   defaultPage: 1,
@@ -80,6 +174,7 @@ export const API_PATHS = {
     gradebook: "/api/gradebook",
     resources: "/api/resources",
     calendar: "/api/calendar",
+    storage: "/api/storage",
   },
   root: {
     subjects: "/subjects",
@@ -94,5 +189,6 @@ export const API_PATHS = {
     gradebook: "/gradebook",
     resources: "/resources",
     calendar: "/calendar",
+    storage: "/storage",
   },
 } as const;

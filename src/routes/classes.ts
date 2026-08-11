@@ -2,9 +2,31 @@ import express from "express";
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { db } from "../db/index.js";
-import { classes, departments, enrollments, subjects, user } from "../db/schema/index.js";
+import { classes, departments, enrollments, storageAssets, subjects, user } from "../db/schema/index.js";
+import { API_PATHS, STORAGE_CONFIG } from "../config/app.js";
 
 const router = express.Router();
+
+const normalizeStorageAssetId = (value: unknown) =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
+
+const getOwnedActiveBannerAsset = async (assetId: string, ownerId: string) => {
+  const [asset] = await db
+    .select()
+    .from(storageAssets)
+    .where(and(
+      eq(storageAssets.id, assetId),
+      eq(storageAssets.ownerId, ownerId),
+      eq(storageAssets.assetKind, "class_banner"),
+      eq(storageAssets.state, "active"),
+      eq(storageAssets.storageProvider, STORAGE_CONFIG.provider),
+    ))
+    .limit(1);
+  return asset ?? null;
+};
+
+const storageRedirectPath = (assetId: string) =>
+  `${API_PATHS.prefixed.storage}${STORAGE_CONFIG.routePaths.redirectByAssetId.replace(":assetId", assetId)}`;
 
 // Get all classes with optional search, subject, teacher filters, and pagination
 router.get("/", async (req, res) => {
@@ -100,12 +122,24 @@ router.post("/", requireAuth, requireRole(["admin", "teacher"]), async (req, res
       status,
       bannerUrl,
       bannerCldPubId,
+      bannerAssetId,
       schedules, // <-- Extract schedules from the request
     } = req.body;
 
     // Optional but highly recommended: Add basic validation here
     if (!name || !teacherId || !subjectId) {
        return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const normalizedBannerAssetId = normalizeStorageAssetId(bannerAssetId);
+    const confirmedBannerAsset = normalizedBannerAssetId
+      ? await getOwnedActiveBannerAsset(normalizedBannerAssetId, req.user!.id)
+      : null;
+    if (normalizedBannerAssetId && !confirmedBannerAsset) {
+      return res.status(422).json({ error: "The selected class banner is not active or does not belong to you" });
+    }
+    if (STORAGE_CONFIG.featureFlags.supabaseWritesEnabled && !confirmedBannerAsset && bannerUrl) {
+      return res.status(410).json({ error: "Direct class-banner URLs are disabled after Supabase Storage cutover" });
     }
 
     const [createdClass] = await db
@@ -115,8 +149,9 @@ router.post("/", requireAuth, requireRole(["admin", "teacher"]), async (req, res
         inviteCode: Math.random().toString(36).substring(2, 9),
         name,
         teacherId,
-        bannerCldPubId,
-        bannerUrl,
+        bannerAssetId: confirmedBannerAsset?.id ?? null,
+        bannerCldPubId: confirmedBannerAsset ? null : bannerCldPubId,
+        bannerUrl: confirmedBannerAsset ? storageRedirectPath(confirmedBannerAsset.id) : bannerUrl,
         capacity,
         description,
         schedules: schedules || [], 
@@ -126,6 +161,14 @@ router.post("/", requireAuth, requireRole(["admin", "teacher"]), async (req, res
 
     if (!createdClass) {
        return res.status(500).json({ error: "Failed to create class" });
+    }
+    if (confirmedBannerAsset) {
+      await db.update(storageAssets).set({
+        entityType: "class",
+        entityId: String(createdClass.id),
+        classId: createdClass.id,
+        updatedAt: new Date(),
+      }).where(eq(storageAssets.id, confirmedBannerAsset.id));
     }
     
     res.status(201).json({ data: createdClass });
@@ -281,18 +324,40 @@ router.put("/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, r
     if (!Number.isFinite(classId)) return res.status(400).json({ error: "Invalid class id" });
 
     const {
-      name, teacherId, subjectId, capacity, description, status, bannerUrl, bannerCldPubId
+      name, teacherId, subjectId, capacity, description, status, bannerUrl, bannerCldPubId, bannerAssetId
     } = req.body;
+    const hasBannerAssetField = Object.hasOwn(req.body ?? {}, "bannerAssetId");
+    const normalizedBannerAssetId = normalizeStorageAssetId(bannerAssetId);
+    const confirmedBannerAsset = normalizedBannerAssetId
+      ? await getOwnedActiveBannerAsset(normalizedBannerAssetId, req.user!.id)
+      : null;
+    if (normalizedBannerAssetId && !confirmedBannerAsset) {
+      return res.status(422).json({ error: "The selected class banner is not active or does not belong to you" });
+    }
+    if (STORAGE_CONFIG.featureFlags.supabaseWritesEnabled && !confirmedBannerAsset && bannerUrl) {
+      return res.status(410).json({ error: "Direct class-banner URLs are disabled after Supabase Storage cutover" });
+    }
 
     const [updatedClass] = await db
       .update(classes)
       .set({
-        name, teacherId, subjectId, capacity, description, status, bannerUrl, bannerCldPubId,
+        name, teacherId, subjectId, capacity, description, status,
+        bannerAssetId: confirmedBannerAsset?.id ?? (hasBannerAssetField ? null : undefined),
+        bannerUrl: confirmedBannerAsset ? storageRedirectPath(confirmedBannerAsset.id) : (hasBannerAssetField ? null : bannerUrl),
+        bannerCldPubId: confirmedBannerAsset || hasBannerAssetField ? null : bannerCldPubId,
       })
       .where(eq(classes.id, classId))
       .returning();
 
     if (!updatedClass) return res.status(404).json({ error: "Class not found" });
+    if (confirmedBannerAsset) {
+      await db.update(storageAssets).set({
+        entityType: "class",
+        entityId: String(classId),
+        classId,
+        updatedAt: new Date(),
+      }).where(eq(storageAssets.id, confirmedBannerAsset.id));
+    }
     res.status(200).json({ data: updatedClass });
   } catch (error) {
     console.error("PUT /classes/:id error:", error);

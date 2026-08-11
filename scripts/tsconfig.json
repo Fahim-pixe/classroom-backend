@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "../.storage-script-build",
+    "noEmit": true
+  },
+  "include": ["../src/**/*.ts", "../src/**/*.d.ts", "./**/*.ts"]
+}

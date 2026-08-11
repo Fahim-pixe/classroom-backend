@@ -3,7 +3,8 @@ import { and, desc, eq, ilike, or, sql, getTableColumns } from "drizzle-orm";
 
 import { db } from "../db/index.js";
 import { requireAuth } from "../middleware/auth.js";
-import { classes, departments, enrollments, subjects, user } from "../db/schema/index.js";
+import { classes, departments, enrollments, storageAssets, subjects, user, userStorageAssets } from "../db/schema/index.js";
+import { API_PATHS, STORAGE_CONFIG } from "../config/app.js";
 
 const router = express.Router();
 
@@ -95,7 +96,13 @@ router.put("/:id", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "You can only update your own profile" });
     }
 
-    const { name, image, imageCldPubId } = req.body ?? {};
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const { name, image, imageCldPubId } = body;
+    const avatarAssetIdValue = body.imageStorageAssetId;
+    const hasAvatarAssetField = Object.hasOwn(body, "imageStorageAssetId");
+    const normalizedAvatarAssetId = typeof avatarAssetIdValue === "string" && avatarAssetIdValue.trim()
+      ? avatarAssetIdValue.trim()
+      : null;
     const normalizedName = typeof name === "string" ? name.trim() : "";
 
     if (normalizedName.length < 2 || normalizedName.length > 120) {
@@ -114,12 +121,42 @@ router.put("/:id", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Image public id must be a string or null" });
     }
 
+    const [currentUser] = await db.select({ image: user.image }).from(user).where(eq(user.id, userId)).limit(1);
+    if (!currentUser) return res.status(404).json({ error: "User not found" });
+
+    let confirmedAvatarAsset: typeof storageAssets.$inferSelect | null = null;
+    if (normalizedAvatarAssetId) {
+      const [asset] = await db.select().from(storageAssets).where(and(
+        eq(storageAssets.id, normalizedAvatarAssetId),
+        eq(storageAssets.ownerId, userId),
+        eq(storageAssets.assetKind, "avatar"),
+        eq(storageAssets.state, "active"),
+        eq(storageAssets.storageProvider, STORAGE_CONFIG.provider),
+      )).limit(1);
+      if (!asset) return res.status(422).json({ error: "The selected avatar asset is not active or does not belong to you" });
+      confirmedAvatarAsset = asset;
+    }
+
+    if (
+      STORAGE_CONFIG.featureFlags.supabaseWritesEnabled &&
+      !confirmedAvatarAsset &&
+      image !== undefined &&
+      image !== currentUser.image
+    ) {
+      return res.status(410).json({ error: "Direct image URLs are disabled after Supabase Storage cutover" });
+    }
+
+    const redirectPath = confirmedAvatarAsset
+      ? `${API_PATHS.prefixed.storage}${STORAGE_CONFIG.routePaths.redirectByAssetId.replace(":assetId", confirmedAvatarAsset.id)}`
+      : hasAvatarAssetField
+        ? null
+        : image ?? null;
     const [updatedUser] = await db
       .update(user)
       .set({
         name: normalizedName,
-        image: image ?? null,
-        imageCldPubId: imageCldPubId ?? null,
+        image: redirectPath,
+        imageCldPubId: confirmedAvatarAsset || hasAvatarAssetField ? null : imageCldPubId ?? null,
         updatedAt: new Date(),
       })
       .where(eq(user.id, userId))
@@ -127,6 +164,16 @@ router.put("/:id", requireAuth, async (req, res) => {
 
     if (!updatedUser) {
       return res.status(404).json({ error: "User not found" });
+    }
+
+    if (confirmedAvatarAsset || hasAvatarAssetField) {
+      await db.insert(userStorageAssets).values({
+        userId,
+        avatarAssetId: confirmedAvatarAsset?.id ?? null,
+      }).onConflictDoUpdate({
+        target: userStorageAssets.userId,
+        set: { avatarAssetId: confirmedAvatarAsset?.id ?? null, updatedAt: new Date() },
+      });
     }
 
     return res.status(200).json({ data: updatedUser });

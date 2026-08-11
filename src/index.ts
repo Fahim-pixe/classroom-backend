@@ -4,7 +4,9 @@ import("apminsight")
 
 import compression from "compression";
 import cors from "cors";
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
+import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
 import { toNodeHandler } from "better-auth/node";
 import { requireAuth } from "./middleware/auth.js";
 import subjectsRouter from "./routes/subjects.js";
@@ -25,7 +27,25 @@ import { API_PATHS, SERVER_CONFIG } from "./config/app.js";
 
 const app = express();
 
+app.set("trust proxy", SERVER_CONFIG.trustProxyHops);
+
 const PORT = SERVER_CONFIG.port;
+
+const apiRateLimiter = rateLimit({
+  windowMs: SERVER_CONFIG.requestRateLimit.windowMs,
+  limit: SERVER_CONFIG.requestRateLimit.limit,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: SERVER_CONFIG.requestRateLimit.message },
+});
+
+const authRateLimiter = rateLimit({
+  windowMs: SERVER_CONFIG.authRateLimit.windowMs,
+  limit: SERVER_CONFIG.authRateLimit.limit,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: SERVER_CONFIG.authRateLimit.message },
+});
 
 const getAllowedOrigins = (): string[] => {
   const origins = [
@@ -49,60 +69,73 @@ app.use(
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      return callback(new Error(`CORS blocked for origin: ${origin}`));
+      return callback(new Error(SERVER_CONFIG.corsErrorMessage));
     },
-    methods: SERVER_CONFIG.corsMethods,
-    allowedHeaders: SERVER_CONFIG.corsHeaders,
+    methods: [...SERVER_CONFIG.corsMethods],
+    allowedHeaders: [...SERVER_CONFIG.corsHeaders],
     credentials: true,
   })
 );
 
-// Better Auth Route
+app.use(helmet());
+
+// Better Auth remains a dedicated boundary. Its rate limit is intentionally tighter than application APIs.
+app.use(API_PATHS.authBase, authRateLimiter);
 app.all(API_PATHS.auth, toNodeHandler(auth));
 
-// Compress application responses only; authentication responses remain outside this boundary.
+// Application responses are compressed after the authentication boundary.
 app.use(
   compression({
     threshold: SERVER_CONFIG.responseCompressionThresholdBytes,
   })
 );
+app.use(express.json({ limit: SERVER_CONFIG.jsonBodyLimit }));
+app.use(apiRateLimiter);
 
-app.use(express.json());
+// Every application router is protected at the mount point. Route-level role checks remain in place.
+app.use(API_PATHS.prefixed.subjects, requireAuth, subjectsRouter);
+app.use(API_PATHS.prefixed.users, requireAuth, usersRouter);
+app.use(API_PATHS.prefixed.classes, requireAuth, classesRouter);
+app.use(API_PATHS.prefixed.departments, requireAuth, departmentsRouter);
+app.use(API_PATHS.prefixed.stats, requireAuth, statsRouter);
+app.use(API_PATHS.prefixed.enrollments, requireAuth, enrollmentsRouter);
+app.use(API_PATHS.prefixed.announcements, requireAuth, announcementsRouter);
+app.use(API_PATHS.prefixed.assignments, requireAuth, assignmentsRouter);
+app.use(API_PATHS.prefixed.attendance, requireAuth, attendanceRouter);
+app.use(API_PATHS.prefixed.gradebook, requireAuth, gradebookRouter);
+app.use(API_PATHS.prefixed.resources, requireAuth, resourcesRouter);
+app.use(API_PATHS.prefixed.calendar, requireAuth, calendarRouter);
 
-// Standard /api prefixed routes
-app.use(API_PATHS.prefixed.subjects, subjectsRouter);
-app.use(API_PATHS.prefixed.users, usersRouter);
-app.use(API_PATHS.prefixed.classes, classesRouter);
-app.use(API_PATHS.prefixed.departments, departmentsRouter);
-app.use(API_PATHS.prefixed.stats, statsRouter);
-app.use(API_PATHS.prefixed.enrollments, enrollmentsRouter);
-app.use(API_PATHS.prefixed.announcements, announcementsRouter);
-app.use(API_PATHS.prefixed.assignments, assignmentsRouter);
-app.use(API_PATHS.prefixed.attendance, attendanceRouter);
-app.use(API_PATHS.prefixed.gradebook, gradebookRouter);
-app.use(API_PATHS.prefixed.resources, resourcesRouter);
-app.use(API_PATHS.prefixed.calendar, calendarRouter);
-
+// Legacy root aliases remain available for existing clients but now enforce the same session boundary.
 app.use(API_PATHS.root.subjects, requireAuth, subjectsRouter);
 app.use(API_PATHS.root.users, requireAuth, usersRouter);
 app.use(API_PATHS.root.classes, requireAuth, classesRouter);
-// Root-level route aliases (Fixes 404 errors when Refine hits root paths directly)
-app.use(API_PATHS.root.subjects, subjectsRouter);
-app.use(API_PATHS.root.users, usersRouter);
-app.use(API_PATHS.root.classes, classesRouter);
-app.use(API_PATHS.root.departments, departmentsRouter);
-app.use(API_PATHS.root.stats, statsRouter);
-app.use(API_PATHS.root.enrollments, enrollmentsRouter);
-app.use(API_PATHS.root.announcements, announcementsRouter);
-app.use(API_PATHS.root.assignments, assignmentsRouter);
-app.use(API_PATHS.root.attendance, attendanceRouter);
-app.use(API_PATHS.root.gradebook, gradebookRouter);
-app.use(API_PATHS.root.resources, resourcesRouter);
-app.use(API_PATHS.root.calendar, calendarRouter);
+app.use(API_PATHS.root.departments, requireAuth, departmentsRouter);
+app.use(API_PATHS.root.stats, requireAuth, statsRouter);
+app.use(API_PATHS.root.enrollments, requireAuth, enrollmentsRouter);
+app.use(API_PATHS.root.announcements, requireAuth, announcementsRouter);
+app.use(API_PATHS.root.assignments, requireAuth, assignmentsRouter);
+app.use(API_PATHS.root.attendance, requireAuth, attendanceRouter);
+app.use(API_PATHS.root.gradebook, requireAuth, gradebookRouter);
+app.use(API_PATHS.root.resources, requireAuth, resourcesRouter);
+app.use(API_PATHS.root.calendar, requireAuth, calendarRouter);
 
 app.get("/", (req, res) => {
   res.send("Backend server is running!");
 });
+
+const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
+  if (res.headersSent) return next(error);
+
+  if (error instanceof Error && error.message === SERVER_CONFIG.corsErrorMessage) {
+    return res.status(403).json({ error: SERVER_CONFIG.corsErrorMessage });
+  }
+
+  console.error("Unhandled request error", error);
+  return res.status(500).json({ error: SERVER_CONFIG.genericErrorMessage });
+};
+
+app.use(errorHandler);
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);

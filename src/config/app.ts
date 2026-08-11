@@ -7,11 +7,25 @@ const configuredOrigins = (process.env.CORS_ORIGINS ?? "")
 
 export const SERVER_CONFIG = {
   port: Number(process.env.PORT) || 8000,
+  trustProxyHops: Number(process.env.TRUST_PROXY_HOPS ?? 1),
   allowedOrigins: configuredOrigins,
   corsMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   corsHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  corsErrorMessage: "Origin is not permitted to access this service",
+  genericErrorMessage: "Unexpected server error",
   responseCompressionThresholdBytes: 1024,
-};
+  jsonBodyLimit: "1mb",
+  requestRateLimit: {
+    windowMs: 15 * 60 * 1000,
+    limit: 600,
+    message: "Too many requests. Please try again later.",
+  },
+  authRateLimit: {
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    message: "Too many authentication attempts. Please try again later.",
+  },
+} as const;
 
 export const CLOUDINARY_CONFIG = {
   cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? "",
@@ -51,6 +65,7 @@ export const GRADEBOOK_ROUTE_PATHS = {
 } as const;
 
 export const API_PATHS = {
+  authBase: "/api/auth",
   auth: "/api/auth/*splat",
   prefixed: {
     subjects: "/api/subjects",

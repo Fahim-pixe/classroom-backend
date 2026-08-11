@@ -24,6 +24,13 @@ export const CALENDAR_CONFIG = {
   weekdayNames: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
 } as const;
 
+export const GRADEBOOK_ROUTE_PATHS = {
+  root: "/",
+  accessibleClasses: "/classes",
+  summary: "/summary",
+  entryById: "/:id",
+} as const;
+
 export const API_PATHS = {
   auth: "/api/auth/*splat",
   prefixed: {

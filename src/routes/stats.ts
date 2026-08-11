@@ -1,6 +1,7 @@
 import express from "express";
-import { and, asc, desc, eq, getTableColumns, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, isNull, sql } from "drizzle-orm";
 
+import { CALENDAR_CONFIG } from "../config/app.js";
 import { db } from "../db/index.js";
 import {
   announcements,
@@ -11,6 +12,7 @@ import {
   departments,
   enrollments,
   subjects,
+  submissions,
   user,
 } from "../db/schema/index.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -220,25 +222,54 @@ router.get("/dashboard", requireAuth, async (req, res) => {
       }});
     }
 
-    const [myClasses, attendance, upcomingAssignments, recentAnnouncements] = await Promise.all([
+    const [myClasses, attendance, upcomingAssignments, pendingWork, recentAnnouncements] = await Promise.all([
       db.select({ id: classes.id, name: classes.name, schedules: classes.schedules, subjectName: subjects.name })
         .from(enrollments).innerJoin(classes, eq(classes.id, enrollments.classId)).innerJoin(subjects, eq(subjects.id, classes.subjectId))
         .where(and(eq(enrollments.studentId, viewer.id), eq(classes.status, "active"))).orderBy(asc(classes.name)),
       db.select({ present: sql<number>`sum(case when ${attendanceRecords.status} = 'present' then 1 else 0 end)`, total: sql<number>`count(*)` })
         .from(attendanceRecords).innerJoin(attendanceSessions, eq(attendanceSessions.id, attendanceRecords.sessionId)).where(eq(attendanceRecords.studentId, viewer.id)),
-      db.select({ id: assignments.id, title: assignments.title, dueAt: assignments.dueAt, className: classes.name })
-        .from(assignments).innerJoin(classes, eq(classes.id, assignments.classId)).innerJoin(enrollments, eq(enrollments.classId, classes.id))
-        .where(and(eq(enrollments.studentId, viewer.id), gte(assignments.dueAt, now))).orderBy(asc(assignments.dueAt)).limit(6),
+      db.select({
+        id: assignments.id,
+        title: assignments.title,
+        dueAt: assignments.dueAt,
+        className: classes.name,
+        submission: { id: submissions.id, submittedAt: submissions.submittedAt, grade: submissions.grade, feedback: submissions.feedback },
+      })
+        .from(assignments)
+        .innerJoin(classes, eq(classes.id, assignments.classId))
+        .innerJoin(enrollments, eq(enrollments.classId, classes.id))
+        .leftJoin(submissions, and(eq(submissions.assignmentId, assignments.id), eq(submissions.studentId, viewer.id)))
+        .where(and(eq(enrollments.studentId, viewer.id), gte(assignments.dueAt, now)))
+        .orderBy(asc(assignments.dueAt))
+        .limit(6),
+      db.select({ value: sql<number>`count(*)` })
+        .from(assignments)
+        .innerJoin(classes, eq(classes.id, assignments.classId))
+        .innerJoin(enrollments, eq(enrollments.classId, classes.id))
+        .leftJoin(submissions, and(eq(submissions.assignmentId, assignments.id), eq(submissions.studentId, viewer.id)))
+        .where(and(eq(enrollments.studentId, viewer.id), gte(assignments.dueAt, now), isNull(submissions.id))),
       db.select({ id: announcements.id, title: announcements.title, createdAt: announcements.createdAt, className: classes.name })
         .from(announcements).innerJoin(classes, eq(classes.id, announcements.classId)).innerJoin(enrollments, eq(enrollments.classId, classes.id))
         .where(eq(enrollments.studentId, viewer.id)).orderBy(desc(announcements.createdAt)).limit(5),
     ]);
     const attendanceTotal = Number(attendance[0]?.total ?? 0);
     const attendancePresent = Number(attendance[0]?.present ?? 0);
+    const currentWeekday = CALENDAR_CONFIG.weekdayNames[now.getDay()];
+    const todaySchedule = myClasses.flatMap((classRecord) => {
+      const schedules = Array.isArray(classRecord.schedules)
+        ? classRecord.schedules.filter((schedule) => schedule.day === currentWeekday)
+        : [];
+      return schedules.length ? [{ ...classRecord, schedules }] : [];
+    });
     return res.json({ data: {
       role: "student",
-      metrics: { myClasses: myClasses.length, attendance: attendanceTotal ? Math.round((attendancePresent / attendanceTotal) * 100) : null, assignments: upcomingAssignments.length, upcoming: upcomingAssignments.length },
-      todaySchedule: myClasses,
+      metrics: {
+        myClasses: myClasses.length,
+        attendance: attendanceTotal ? Math.round((attendancePresent / attendanceTotal) * 100) : null,
+        assignments: Number(pendingWork[0]?.value ?? 0),
+        upcoming: upcomingAssignments.length,
+      },
+      todaySchedule,
       upcomingAssignments,
       recentAnnouncements,
       studentDistribution: [],

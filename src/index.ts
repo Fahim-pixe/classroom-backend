@@ -17,6 +17,7 @@ import assignmentsRouter from "./routes/assignments.js";
 import attendanceRouter from "./routes/attendance.js";
 import gradebookRouter from "./routes/gradebook.js";
 import resourcesRouter from "./routes/resources.js";
+import calendarRouter from "./routes/calendar.js";
 
 import { auth } from "./lib/auth.js";
 import { API_PATHS, SERVER_CONFIG } from "./config/app.js";
@@ -72,6 +73,7 @@ app.use(API_PATHS.prefixed.assignments, assignmentsRouter);
 app.use(API_PATHS.prefixed.attendance, attendanceRouter);
 app.use(API_PATHS.prefixed.gradebook, gradebookRouter);
 app.use(API_PATHS.prefixed.resources, resourcesRouter);
+app.use(API_PATHS.prefixed.calendar, calendarRouter);
 
 app.use(API_PATHS.root.subjects, requireAuth, subjectsRouter);
 app.use(API_PATHS.root.users, requireAuth, usersRouter);
@@ -88,6 +90,7 @@ app.use(API_PATHS.root.assignments, assignmentsRouter);
 app.use(API_PATHS.root.attendance, attendanceRouter);
 app.use(API_PATHS.root.gradebook, gradebookRouter);
 app.use(API_PATHS.root.resources, resourcesRouter);
+app.use(API_PATHS.root.calendar, calendarRouter);
 
 app.get("/", (req, res) => {
   res.send("Backend server is running!");

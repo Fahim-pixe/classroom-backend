@@ -19,6 +19,11 @@ export const CLOUDINARY_CONFIG = {
   uploadFolder: process.env.CLOUDINARY_UPLOAD_FOLDER ?? "classroom/resources",
 };
 
+export const CALENDAR_CONFIG = {
+  weekStartsOn: 1,
+  weekdayNames: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+} as const;
+
 export const API_PATHS = {
   auth: "/api/auth/*splat",
   prefixed: {
@@ -33,6 +38,7 @@ export const API_PATHS = {
     attendance: "/api/attendance",
     gradebook: "/api/gradebook",
     resources: "/api/resources",
+    calendar: "/api/calendar",
   },
   root: {
     subjects: "/subjects",
@@ -46,5 +52,6 @@ export const API_PATHS = {
     attendance: "/attendance",
     gradebook: "/gradebook",
     resources: "/resources",
+    calendar: "/calendar",
   },
 } as const;

@@ -24,6 +24,18 @@ export const CALENDAR_CONFIG = {
   weekdayNames: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
 } as const;
 
+export const ATTENDANCE_CONFIG = {
+  riskThresholdPercent: 75,
+  qualifyingStatuses: ["present", "late", "excused"],
+} as const;
+
+export const ATTENDANCE_ROUTE_PATHS = {
+  root: "/",
+  sessions: "/sessions",
+  accessibleClasses: "/classes",
+  summary: "/summary",
+} as const;
+
 export const GRADEBOOK_ROUTE_PATHS = {
   root: "/",
   accessibleClasses: "/classes",

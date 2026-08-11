@@ -112,6 +112,7 @@ export const resources = pgTable(
     classIdIdx: index("resources_class_id_idx").on(table.classId),
     ownerIdIdx: index("resources_owner_id_idx").on(table.ownerId),
     categoryIdx: index("resources_category_idx").on(table.category),
+    classCategoryCreatedIdx: index("resources_class_category_created_idx").on(table.classId, table.category, table.createdAt),
     publishedIdx: index("resources_published_idx").on(table.isPublished, table.isArchived),
   })
 );
@@ -279,6 +280,7 @@ export const attendanceRecords = pgTable(
   (table) => ({
     sessionStudentUnique: uniqueIndex("attendance_records_session_student_unique").on(table.sessionId, table.studentId),
     sessionIdIdx: index("attendance_records_session_id_idx").on(table.sessionId),
+    studentSessionIdx: index("attendance_records_student_session_idx").on(table.studentId, table.sessionId),
   })
 );
 

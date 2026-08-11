@@ -57,6 +57,13 @@
       "when": 1786204551188,
       "tag": "0007_cultured_bloodstorm",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786484055296,
+      "tag": "0008_vengeful_prowler",
+      "breakpoints": true
     }
   ]
 }

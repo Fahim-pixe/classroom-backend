@@ -2,6 +2,7 @@ import("apminsight")
   .then(({ default: AgentAPI }) => AgentAPI.config())
   .catch(() => console.log("APM not available in this environment"));
 
+import compression from "compression";
 import cors from "cors";
 import express from "express";
 import { toNodeHandler } from "better-auth/node";
@@ -58,6 +59,13 @@ app.use(
 
 // Better Auth Route
 app.all(API_PATHS.auth, toNodeHandler(auth));
+
+// Compress application responses only; authentication responses remain outside this boundary.
+app.use(
+  compression({
+    threshold: SERVER_CONFIG.responseCompressionThresholdBytes,
+  })
+);
 
 app.use(express.json());
 

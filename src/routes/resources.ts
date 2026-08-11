@@ -1,10 +1,10 @@
 import express from "express";
 import crypto from "node:crypto";
-import { and, desc, eq, getTableColumns, ilike, or } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { classes, enrollments, resourceFavorites, resources, resourceViews, subjects } from "../db/schema/index.js";
-import { CLOUDINARY_CONFIG } from "../config/app.js";
+import { CLOUDINARY_CONFIG, RESOURCE_LIST_CONFIG } from "../config/app.js";
 
 const router = express.Router();
 
@@ -42,6 +42,15 @@ router.get("/", requireAuth, async (req, res) => {
     const search = String(req.query.search ?? "").trim();
     const category = String(req.query.category ?? "").trim();
     const classId = Number(req.query.classId);
+    const requestedPage = Number(req.query.page);
+    const requestedLimit = Number(req.query.limit);
+    const page = Number.isInteger(requestedPage) && requestedPage > 0
+      ? requestedPage
+      : RESOURCE_LIST_CONFIG.defaultPage;
+    const limit = Number.isInteger(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, RESOURCE_LIST_CONFIG.maxPageSize)
+      : RESOURCE_LIST_CONFIG.defaultPageSize;
+    const offset = (page - 1) * limit;
     const currentUser = req.user!;
     const filters = [
       eq(resources.isArchived, false),
@@ -51,6 +60,14 @@ router.get("/", requireAuth, async (req, res) => {
       Number.isInteger(classId) && classId > 0 ? eq(resources.classId, classId) : undefined,
       accessibleClassCondition(currentUser.id, currentUser.role),
     ].filter(Boolean) as any[];
+
+    const totals = await db
+      .select({ total: sql<number>`count(distinct ${resources.id})` })
+      .from(resources)
+      .innerJoin(classes, eq(resources.classId, classes.id))
+      .leftJoin(enrollments, eq(enrollments.classId, classes.id))
+      .where(and(...filters));
+    const total = totals[0]?.total ?? 0;
 
     const rows = await db
       .selectDistinct({
@@ -67,9 +84,18 @@ router.get("/", requireAuth, async (req, res) => {
       .leftJoin(resourceFavorites, and(eq(resourceFavorites.resourceId, resources.id), eq(resourceFavorites.userId, currentUser.id)))
       .leftJoin(resourceViews, and(eq(resourceViews.resourceId, resources.id), eq(resourceViews.userId, currentUser.id)))
       .where(and(...filters))
-      .orderBy(desc(resources.createdAt));
+      .orderBy(desc(resources.createdAt))
+      .limit(limit)
+      .offset(offset);
 
-    return res.json({ data: rows.map((row) => ({ ...row, isFavorite: Boolean(row.isFavorite) })) });
+    return res.json({
+      data: rows.map((row) => ({ ...row, isFavorite: Boolean(row.isFavorite) })),
+      pagination: {
+        total: Number(total ?? 0),
+        page,
+        limit,
+      },
+    });
   } catch (error) {
     console.error("GET /resources error:", error);
     return res.status(500).json({ error: "Failed to fetch resources" });

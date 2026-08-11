@@ -10,6 +10,7 @@ export const SERVER_CONFIG = {
   allowedOrigins: configuredOrigins,
   corsMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   corsHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  responseCompressionThresholdBytes: 1024,
 };
 
 export const CLOUDINARY_CONFIG = {
@@ -18,6 +19,12 @@ export const CLOUDINARY_CONFIG = {
   apiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
   uploadFolder: process.env.CLOUDINARY_UPLOAD_FOLDER ?? "classroom/resources",
 };
+
+export const RESOURCE_LIST_CONFIG = {
+  defaultPage: 1,
+  defaultPageSize: 24,
+  maxPageSize: 100,
+} as const;
 
 export const CALENDAR_CONFIG = {
   weekStartsOn: 1,

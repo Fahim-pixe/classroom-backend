@@ -1,0 +1,2 @@
+CREATE INDEX "attendance_records_student_session_idx" ON "attendance_records" USING btree ("student_id","session_id");--> statement-breakpoint
+CREATE INDEX "resources_class_category_created_idx" ON "resources" USING btree ("class_id","category","created_at");

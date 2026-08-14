@@ -70,6 +70,7 @@ export const STORAGE_CONFIG = {
     download: Number(process.env.STORAGE_DOWNLOAD_URL_TTL_SECONDS ?? 900),
     uploadIntent: Number(process.env.STORAGE_UPLOAD_INTENT_TTL_SECONDS ?? 900),
   },
+  signedUrlCacheSafetySeconds: Number(process.env.STORAGE_SIGNED_URL_CACHE_SAFETY_SECONDS ?? 30),
   uploads: {
     standardUploadMaximumBytes: Number(process.env.STORAGE_STANDARD_UPLOAD_MAXIMUM_BYTES ?? 6 * 1024 * 1024),
     maximumBytesByKind: {

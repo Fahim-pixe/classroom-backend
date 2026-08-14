@@ -83,6 +83,12 @@ const normalizeRequestedFile = (body: Record<string, unknown>, assetKind: Storag
   return { fileName, mimeType, fileSizeBytes } as const;
 };
 
+const setSignedAccessCacheHeaders = (res: express.Response, expiresInSeconds: number) => {
+  const cacheSeconds = Math.max(0, expiresInSeconds - STORAGE_CONFIG.signedUrlCacheSafetySeconds);
+  res.setHeader("Cache-Control", `private, max-age=${cacheSeconds}, must-revalidate`);
+  res.setHeader("Vary", "Cookie");
+};
+
 const respondStorageError = (res: express.Response, error: unknown, fallbackMessage: string) => {
   if (error instanceof StorageAuthorizationError) {
     return res.status(403).json({ error: error.message });
@@ -323,6 +329,7 @@ router.get(STORAGE_CONFIG.routePaths.accessByAssetId, requireAuth, async (req, r
       details: { mode: requestedMode, expiresInSeconds, actorId: req.user!.id },
     });
 
+    setSignedAccessCacheHeaders(res, expiresInSeconds);
     return res.json({
       data: {
         url,

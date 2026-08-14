@@ -132,6 +132,9 @@ export const RESOURCE_LIST_CONFIG = {
   defaultPage: 1,
   defaultPageSize: 24,
   maxPageSize: 100,
+  queryParams: {
+    favoritesOnly: "favoritesOnly",
+  },
 } as const;
 
 export const CALENDAR_CONFIG = {

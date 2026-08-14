@@ -45,6 +45,7 @@ router.get("/", requireAuth, async (req, res) => {
     const search = String(req.query.search ?? "").trim();
     const category = String(req.query.category ?? "").trim();
     const classId = Number(req.query.classId);
+    const favoritesOnly = String(req.query[RESOURCE_LIST_CONFIG.queryParams.favoritesOnly] ?? "").toLowerCase() === "true";
     const requestedPage = Number(req.query.page);
     const requestedLimit = Number(req.query.limit);
     const page = Number.isInteger(requestedPage) && requestedPage > 0
@@ -61,6 +62,7 @@ router.get("/", requireAuth, async (req, res) => {
       search ? or(ilike(resources.title, `%${search}%`), ilike(resources.description, `%${search}%`)) : undefined,
       category ? eq(resources.category, category as any) : undefined,
       Number.isInteger(classId) && classId > 0 ? eq(resources.classId, classId) : undefined,
+      favoritesOnly ? sql`${resourceFavorites.id} IS NOT NULL` : undefined,
       accessibleClassCondition(currentUser.id, currentUser.role),
     ].filter(Boolean) as any[];
 
@@ -69,6 +71,7 @@ router.get("/", requireAuth, async (req, res) => {
       .from(resources)
       .innerJoin(classes, eq(resources.classId, classes.id))
       .leftJoin(enrollments, eq(enrollments.classId, classes.id))
+      .leftJoin(resourceFavorites, and(eq(resourceFavorites.resourceId, resources.id), eq(resourceFavorites.userId, currentUser.id)))
       .where(and(...filters));
     const total = totals[0]?.total ?? 0;
 

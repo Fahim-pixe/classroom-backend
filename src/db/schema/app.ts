@@ -242,6 +242,10 @@ export const resources = pgTable(
     fileSizeBytes: integer("file_size_bytes"),
     isPublished: boolean("is_published").notNull().default(true),
     isArchived: boolean("is_archived").notNull().default(false),
+    folder: varchar("folder", { length: 120 }),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    expiresAt: timestamp("expires_at"),
+    version: integer("version").notNull().default(1),
     ...timestamps,
   },
   (table) => ({
@@ -250,6 +254,8 @@ export const resources = pgTable(
     categoryIdx: index("resources_category_idx").on(table.category),
     classCategoryCreatedIdx: index("resources_class_category_created_idx").on(table.classId, table.category, table.createdAt),
     publishedIdx: index("resources_published_idx").on(table.isPublished, table.isArchived),
+    classFolderIdx: index("resources_class_folder_idx").on(table.classId, table.folder),
+    expiresAtIdx: index("resources_expires_at_idx").on(table.expiresAt),
   })
 );
 

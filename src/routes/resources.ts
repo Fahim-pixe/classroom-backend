@@ -1,10 +1,10 @@
 import express from "express";
 import crypto from "node:crypto";
-import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gt, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { classes, enrollments, resourceFavorites, resources, resourceViews, storageAssets, subjects } from "../db/schema/index.js";
-import { CLOUDINARY_CONFIG, RESOURCE_LIST_CONFIG, STORAGE_CONFIG } from "../config/app.js";
+import { CLOUDINARY_CONFIG, RESOURCE_LIFECYCLE_CONFIG, RESOURCE_LIST_CONFIG, STORAGE_CONFIG } from "../config/app.js";
 
 const router = express.Router();
 
@@ -14,6 +14,47 @@ const accessibleClassCondition = (userId: string, role: string) =>
     : role === "teacher"
       ? eq(classes.teacherId, userId)
       : eq(enrollments.studentId, userId);
+
+const currentUserCanManageExpired = (role: string, value: unknown) =>
+  (role === "admin" || role === "teacher") && String(value ?? "").toLowerCase() === "true";
+
+const normalizeTags = (value: unknown) => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .map((tag) => String(tag).trim())
+    .filter((tag) => tag.length > 0 && tag.length <= RESOURCE_LIFECYCLE_CONFIG.metadata.maximumTagLength)
+    .filter((tag) => {
+      const key = tag.toLocaleLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, RESOURCE_LIFECYCLE_CONFIG.metadata.maximumTagCount);
+};
+
+const normalizeFolder = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const folder = value.trim();
+  return folder && folder.length <= RESOURCE_LIFECYCLE_CONFIG.metadata.maximumFolderLength ? folder : null;
+};
+
+const normalizeExpiry = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
+const getManagedResource = async (resourceId: number, userId: string, role: string) => {
+  const [resource] = await db
+    .select({ resource: getTableColumns(resources), teacherId: classes.teacherId })
+    .from(resources)
+    .innerJoin(classes, eq(resources.classId, classes.id))
+    .where(eq(resources.id, resourceId))
+    .limit(1);
+  if (!resource || (role === "teacher" && resource.teacherId !== userId)) return null;
+  return resource.resource;
+};
 
 router.post("/upload-signature", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   if (STORAGE_CONFIG.featureFlags.supabaseWritesEnabled) {
@@ -46,6 +87,9 @@ router.get("/", requireAuth, async (req, res) => {
     const category = String(req.query.category ?? "").trim();
     const classId = Number(req.query.classId);
     const favoritesOnly = String(req.query[RESOURCE_LIST_CONFIG.queryParams.favoritesOnly] ?? "").toLowerCase() === "true";
+    const folder = String(req.query[RESOURCE_LIST_CONFIG.queryParams.folder] ?? "").trim();
+    const tag = String(req.query[RESOURCE_LIST_CONFIG.queryParams.tag] ?? "").trim();
+    const includeExpired = currentUserCanManageExpired(req.user!.role, req.query[RESOURCE_LIST_CONFIG.queryParams.includeExpired]);
     const requestedPage = Number(req.query.page);
     const requestedLimit = Number(req.query.limit);
     const page = Number.isInteger(requestedPage) && requestedPage > 0
@@ -62,6 +106,9 @@ router.get("/", requireAuth, async (req, res) => {
       search ? or(ilike(resources.title, `%${search}%`), ilike(resources.description, `%${search}%`)) : undefined,
       category ? eq(resources.category, category as any) : undefined,
       Number.isInteger(classId) && classId > 0 ? eq(resources.classId, classId) : undefined,
+      folder ? eq(resources.folder, folder) : undefined,
+      tag ? sql`${resources.tags} @> ${JSON.stringify([tag])}::jsonb` : undefined,
+      includeExpired ? undefined : or(isNull(resources.expiresAt), gt(resources.expiresAt, new Date())),
       favoritesOnly ? sql`${resourceFavorites.id} IS NOT NULL` : undefined,
       accessibleClassCondition(currentUser.id, currentUser.role),
     ].filter(Boolean) as any[];
@@ -110,11 +157,14 @@ router.get("/", requireAuth, async (req, res) => {
 
 router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res) => {
   try {
-    const { classId, title, description, category = "other", resourceUrl, storageAssetId, mimeType, fileSizeBytes, isPublished = true } = req.body ?? {};
+    const { classId, title, description, category = "other", resourceUrl, storageAssetId, mimeType, fileSizeBytes, isPublished = true, folder, tags, expiresAt } = req.body ?? {};
     const parsedClassId = Number(classId);
     const normalizedStorageAssetId = storageAssetId ? String(storageAssetId) : null;
     const normalizedResourceUrl = resourceUrl ? String(resourceUrl).trim() : "";
-    if (!Number.isInteger(parsedClassId) || !title || (!normalizedResourceUrl && !normalizedStorageAssetId)) {
+    const normalizedFolder = normalizeFolder(folder);
+    const normalizedTags = normalizeTags(tags);
+    const normalizedExpiry = normalizeExpiry(expiresAt);
+    if (!Number.isInteger(parsedClassId) || !title || normalizedExpiry === undefined || (!normalizedResourceUrl && !normalizedStorageAssetId)) {
       return res.status(400).json({ error: "classId, title, and either resourceUrl or storageAssetId are required" });
     }
     const [targetClass] = await db.select({ id: classes.id, teacherId: classes.teacherId }).from(classes).where(eq(classes.id, parsedClassId)).limit(1);
@@ -147,6 +197,9 @@ router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res
       mimeType: confirmedAsset?.mimeType ?? (mimeType ? String(mimeType) : null),
       fileSizeBytes: confirmedAsset?.fileSizeBytes ?? (Number.isInteger(Number(fileSizeBytes)) ? Number(fileSizeBytes) : null),
       isPublished: isPublished !== false,
+      folder: normalizedFolder,
+      tags: normalizedTags,
+      expiresAt: normalizedExpiry,
     }).returning();
     if (created && confirmedAsset) {
       await db.update(storageAssets)
@@ -157,6 +210,65 @@ router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res
   } catch (error) {
     console.error("POST /resources error:", error);
     return res.status(500).json({ error: "Failed to create resource" });
+  }
+});
+
+router.patch(RESOURCE_LIFECYCLE_CONFIG.routePaths.versionById, requireAuth, requireRole(["teacher", "admin"]), async (req, res) => {
+  try {
+    const resourceId = Number(req.params.id);
+    if (!Number.isInteger(resourceId)) return res.status(400).json({ error: "Invalid resource id" });
+    const existing = await getManagedResource(resourceId, req.user!.id, req.user!.role);
+    if (!existing) return res.status(404).json({ error: "Resource not found" });
+
+    const normalizedFolder = normalizeFolder(req.body?.folder);
+    const normalizedTags = normalizeTags(req.body?.tags);
+    const normalizedExpiry = normalizeExpiry(req.body?.expiresAt);
+    if (normalizedExpiry === undefined) return res.status(400).json({ error: "Invalid resource expiry" });
+    const nextVersion = existing.version + 1;
+    if (nextVersion > RESOURCE_LIFECYCLE_CONFIG.metadata.maximumVersion) {
+      return res.status(422).json({ error: "Resource revision limit reached" });
+    }
+
+    const [updated] = await db.update(resources).set({
+      title: req.body?.title ? String(req.body.title).trim() : existing.title,
+      description: req.body?.description === undefined ? existing.description : String(req.body.description).trim() || null,
+      folder: req.body?.folder === undefined ? existing.folder : normalizedFolder,
+      tags: req.body?.tags === undefined ? existing.tags : normalizedTags,
+      expiresAt: req.body?.expiresAt === undefined ? existing.expiresAt : normalizedExpiry,
+      isPublished: typeof req.body?.isPublished === "boolean" ? req.body.isPublished : existing.isPublished,
+      version: nextVersion,
+      updatedAt: new Date(),
+    }).where(eq(resources.id, resourceId)).returning();
+    return res.json({ data: updated });
+  } catch (error) {
+    console.error("PATCH /resources/:id/version error:", error);
+    return res.status(500).json({ error: "Failed to revise resource" });
+  }
+});
+
+router.post(RESOURCE_LIFECYCLE_CONFIG.routePaths.archiveById, requireAuth, requireRole(["teacher", "admin"]), async (req, res) => {
+  try {
+    const resourceId = Number(req.params.id);
+    const existing = Number.isInteger(resourceId) ? await getManagedResource(resourceId, req.user!.id, req.user!.role) : null;
+    if (!existing) return res.status(404).json({ error: "Resource not found" });
+    const [updated] = await db.update(resources).set({ isArchived: true, updatedAt: new Date() }).where(eq(resources.id, resourceId)).returning();
+    return res.json({ data: updated });
+  } catch (error) {
+    console.error("POST /resources/:id/archive error:", error);
+    return res.status(500).json({ error: "Failed to archive resource" });
+  }
+});
+
+router.post(RESOURCE_LIFECYCLE_CONFIG.routePaths.restoreById, requireAuth, requireRole(["teacher", "admin"]), async (req, res) => {
+  try {
+    const resourceId = Number(req.params.id);
+    const existing = Number.isInteger(resourceId) ? await getManagedResource(resourceId, req.user!.id, req.user!.role) : null;
+    if (!existing) return res.status(404).json({ error: "Resource not found" });
+    const [updated] = await db.update(resources).set({ isArchived: false, updatedAt: new Date() }).where(eq(resources.id, resourceId)).returning();
+    return res.json({ data: updated });
+  } catch (error) {
+    console.error("POST /resources/:id/restore error:", error);
+    return res.status(500).json({ error: "Failed to restore resource" });
   }
 });
 

@@ -159,6 +159,35 @@ export const RESOURCE_LIST_CONFIG = {
   maxPageSize: 100,
   queryParams: {
     favoritesOnly: "favoritesOnly",
+    folder: "folder",
+    tag: "tag",
+    includeExpired: "includeExpired",
+  },
+} as const;
+
+export const RESOURCE_LIFECYCLE_CONFIG = {
+  metadata: {
+    maximumFolderLength: 120,
+    maximumTagCount: 12,
+    maximumTagLength: 48,
+    maximumVersion: 1_000,
+  },
+  routePaths: {
+    resourceById: "/:id",
+    archiveById: "/:id/archive",
+    restoreById: "/:id/restore",
+    versionById: "/:id/version",
+  },
+} as const;
+
+export const CLASS_LIFECYCLE_CONFIG = {
+  inviteCodeLength: 10,
+  duplicateNameSuffix: "(Copy)",
+  routePaths: {
+    archiveById: "/:id/archive",
+    restoreById: "/:id/restore",
+    duplicateById: "/:id/duplicate",
+    rotateInviteById: "/:id/invite-code",
   },
 } as const;
 

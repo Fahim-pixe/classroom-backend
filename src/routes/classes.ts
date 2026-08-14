@@ -1,9 +1,10 @@
 import express from "express";
+import crypto from "node:crypto";
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { db } from "../db/index.js";
 import { classes, departments, enrollments, storageAssets, subjects, user } from "../db/schema/index.js";
-import { API_PATHS, STORAGE_CONFIG } from "../config/app.js";
+import { API_PATHS, CLASS_LIFECYCLE_CONFIG, STORAGE_CONFIG } from "../config/app.js";
 
 const router = express.Router();
 
@@ -27,6 +28,23 @@ const getOwnedActiveBannerAsset = async (assetId: string, ownerId: string) => {
 
 const storageRedirectPath = (assetId: string) =>
   `${API_PATHS.prefixed.storage}${STORAGE_CONFIG.routePaths.redirectByAssetId.replace(":assetId", assetId)}`;
+
+const isClassManager = (classRecord: Pick<typeof classes.$inferSelect, "teacherId">, userId: string, role: string) =>
+  role === "admin" || classRecord.teacherId === userId;
+
+const createInviteCode = () => crypto
+  .randomBytes(CLASS_LIFECYCLE_CONFIG.inviteCodeLength)
+  .toString("base64url")
+  .slice(0, CLASS_LIFECYCLE_CONFIG.inviteCodeLength);
+
+const createUniqueInviteCode = async () => {
+  for (let attempt = 0; attempt < CLASS_LIFECYCLE_CONFIG.inviteCodeLength; attempt += 1) {
+    const inviteCode = createInviteCode();
+    const [existing] = await db.select({ id: classes.id }).from(classes).where(eq(classes.inviteCode, inviteCode)).limit(1);
+    if (!existing) return inviteCode;
+  }
+  throw new Error("Unable to create a unique class invitation code");
+};
 
 // Get all classes with optional search, subject, teacher filters, and pagination
 router.get("/", async (req, res) => {
@@ -176,6 +194,75 @@ router.post("/", requireAuth, requireRole(["admin", "teacher"]), async (req, res
   } catch (error) {
     console.error("POST /classes error:", error);
     res.status(500).json({ error: "Failed to create class" });
+  }
+});
+
+router.post(CLASS_LIFECYCLE_CONFIG.routePaths.archiveById, requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  try {
+    const classId = Number(req.params.id);
+    if (!Number.isInteger(classId)) return res.status(400).json({ error: "Invalid class id" });
+    const [targetClass] = await db.select().from(classes).where(eq(classes.id, classId)).limit(1);
+    if (!targetClass) return res.status(404).json({ error: "Class not found" });
+    if (!isClassManager(targetClass, req.user!.id, req.user!.role)) return res.status(403).json({ error: "You can only archive your classes" });
+    const [updated] = await db.update(classes).set({ status: "archived", updatedAt: new Date() }).where(eq(classes.id, classId)).returning();
+    return res.json({ data: updated });
+  } catch (error) {
+    console.error("POST /classes/:id/archive error:", error);
+    return res.status(500).json({ error: "Failed to archive class" });
+  }
+});
+
+router.post(CLASS_LIFECYCLE_CONFIG.routePaths.restoreById, requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  try {
+    const classId = Number(req.params.id);
+    if (!Number.isInteger(classId)) return res.status(400).json({ error: "Invalid class id" });
+    const [targetClass] = await db.select().from(classes).where(eq(classes.id, classId)).limit(1);
+    if (!targetClass) return res.status(404).json({ error: "Class not found" });
+    if (!isClassManager(targetClass, req.user!.id, req.user!.role)) return res.status(403).json({ error: "You can only restore your classes" });
+    const [updated] = await db.update(classes).set({ status: "active", updatedAt: new Date() }).where(eq(classes.id, classId)).returning();
+    return res.json({ data: updated });
+  } catch (error) {
+    console.error("POST /classes/:id/restore error:", error);
+    return res.status(500).json({ error: "Failed to restore class" });
+  }
+});
+
+router.post(CLASS_LIFECYCLE_CONFIG.routePaths.rotateInviteById, requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  try {
+    const classId = Number(req.params.id);
+    if (!Number.isInteger(classId)) return res.status(400).json({ error: "Invalid class id" });
+    const [targetClass] = await db.select().from(classes).where(eq(classes.id, classId)).limit(1);
+    if (!targetClass) return res.status(404).json({ error: "Class not found" });
+    if (!isClassManager(targetClass, req.user!.id, req.user!.role)) return res.status(403).json({ error: "You can only rotate invitations for your classes" });
+    const [updated] = await db.update(classes).set({ inviteCode: await createUniqueInviteCode(), updatedAt: new Date() }).where(eq(classes.id, classId)).returning({ id: classes.id, inviteCode: classes.inviteCode });
+    return res.json({ data: updated });
+  } catch (error) {
+    console.error("POST /classes/:id/invite-code error:", error);
+    return res.status(500).json({ error: "Failed to rotate class invitation" });
+  }
+});
+
+router.post(CLASS_LIFECYCLE_CONFIG.routePaths.duplicateById, requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  try {
+    const classId = Number(req.params.id);
+    if (!Number.isInteger(classId)) return res.status(400).json({ error: "Invalid class id" });
+    const [sourceClass] = await db.select().from(classes).where(eq(classes.id, classId)).limit(1);
+    if (!sourceClass) return res.status(404).json({ error: "Class not found" });
+    if (!isClassManager(sourceClass, req.user!.id, req.user!.role)) return res.status(403).json({ error: "You can only duplicate your classes" });
+    const [duplicate] = await db.insert(classes).values({
+      subjectId: sourceClass.subjectId,
+      teacherId: sourceClass.teacherId,
+      inviteCode: await createUniqueInviteCode(),
+      name: `${sourceClass.name} ${CLASS_LIFECYCLE_CONFIG.duplicateNameSuffix}`,
+      capacity: sourceClass.capacity,
+      description: sourceClass.description,
+      status: "inactive",
+      schedules: sourceClass.schedules,
+    }).returning();
+    return res.status(201).json({ data: duplicate });
+  } catch (error) {
+    console.error("POST /classes/:id/duplicate error:", error);
+    return res.status(500).json({ error: "Failed to duplicate class" });
   }
 });
 

@@ -22,6 +22,7 @@ import attendanceRouter from "./routes/attendance.js";
 import gradebookRouter from "./routes/gradebook.js";
 import resourcesRouter from "./routes/resources.js";
 import calendarRouter from "./routes/calendar.js";
+import notificationsRouter from "./routes/notifications.js";
 import storageRouter from "./routes/storage.js";
 import monitoringRouter from "./routes/monitoring.js";
 
@@ -109,6 +110,7 @@ app.use(API_PATHS.prefixed.attendance, requireAuth, attendanceRouter);
 app.use(API_PATHS.prefixed.gradebook, requireAuth, gradebookRouter);
 app.use(API_PATHS.prefixed.resources, requireAuth, resourcesRouter);
 app.use(API_PATHS.prefixed.calendar, requireAuth, calendarRouter);
+app.use(API_PATHS.prefixed.notifications, requireAuth, notificationsRouter);
 app.use(API_PATHS.prefixed.storage, requireAuth, storageRouter);
 app.use(API_PATHS.prefixed.monitoring, requireAuth, monitoringRouter);
 
@@ -125,6 +127,7 @@ app.use(API_PATHS.root.attendance, requireAuth, attendanceRouter);
 app.use(API_PATHS.root.gradebook, requireAuth, gradebookRouter);
 app.use(API_PATHS.root.resources, requireAuth, resourcesRouter);
 app.use(API_PATHS.root.calendar, requireAuth, calendarRouter);
+app.use(API_PATHS.root.notifications, requireAuth, notificationsRouter);
 app.use(API_PATHS.root.storage, requireAuth, storageRouter);
 app.use(API_PATHS.root.monitoring, requireAuth, monitoringRouter);
 

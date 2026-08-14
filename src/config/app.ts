@@ -199,6 +199,42 @@ export const MONITORING_ROUTE_PATHS = {
 export const CALENDAR_CONFIG = {
   weekStartsOn: 1,
   weekdayNames: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+  eventTypes: ["class_session", "assignment_due", "exam", "holiday", "custom"],
+  recurrenceValues: ["none", "weekly", "monthly"],
+  defaultRecurrence: "none",
+  defaultEventType: "custom",
+  validation: {
+    maximumTitleLength: 200,
+    maximumDescriptionLength: 5_000,
+    maximumRangeDays: 93,
+    maximumRecurrenceOccurrences: 1_000,
+    millisecondsPerDay: 86_400_000,
+  },
+} as const;
+export const CALENDAR_ROUTE_PATHS = {
+  root: "/",
+  myWeek: "/my-week",
+  accessibleClasses: "/classes",
+  eventById: "/:id",
+} as const;
+export const NOTIFICATION_CONFIG = {
+  defaultInAppPreferences: {
+    class_session: true,
+    assignment_due: true,
+    exam: true,
+    holiday: true,
+    custom: true,
+  },
+  defaultEmailPreferences: {
+    class_session: false,
+    assignment_due: false,
+    exam: false,
+    holiday: false,
+    custom: false,
+  },
+} as const;
+export const NOTIFICATION_ROUTE_PATHS = {
+  preferences: "/preferences",
 } as const;
 
 export const ATTENDANCE_CONFIG = {
@@ -263,6 +299,7 @@ export const API_PATHS = {
     gradebook: "/api/gradebook",
     resources: "/api/resources",
     calendar: "/api/calendar",
+    notifications: "/api/notifications",
     storage: "/api/storage",
     monitoring: "/api/monitoring",
   },
@@ -279,6 +316,7 @@ export const API_PATHS = {
     gradebook: "/gradebook",
     resources: "/resources",
     calendar: "/calendar",
+    notifications: "/notifications",
     storage: "/storage",
     monitoring: "/monitoring",
   },

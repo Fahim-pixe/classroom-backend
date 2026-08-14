@@ -41,6 +41,17 @@ export const classStatusEnum = pgEnum("class_status", [
   "archived",
 ]);
 
+export const calendarEventTypeValues = [
+  "class_session",
+  "assignment_due",
+  "exam",
+  "holiday",
+  "custom",
+] as const;
+export type CalendarEventType = (typeof calendarEventTypeValues)[number];
+export type NotificationEventPreferenceMap = Record<CalendarEventType, boolean>;
+export const calendarEventTypeEnum = pgEnum("calendar_event_type", calendarEventTypeValues);
+
 export const departments = pgTable("departments", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   code: varchar("code", { length: 50 }).notNull().unique(),
@@ -213,6 +224,39 @@ export const classes = pgTable(
     teacherIdIdx: index("classes_teacher_id_idx").on(table.teacherId),
   })
 );
+
+export const calendarEvents = pgTable(
+  "calendar_events",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    classId: integer("class_id").references(() => classes.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 200 }).notNull(),
+    description: text("description"),
+    type: calendarEventTypeEnum("type").notNull().default("custom"),
+    startAt: timestamp("start_at").notNull(),
+    endAt: timestamp("end_at").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    isAllDay: boolean("is_all_day").notNull().default(false),
+    recurrence: varchar("recurrence", { length: 60 }).notNull().default("none"),
+    ...timestamps,
+  },
+  (table) => ({
+    classStartIdx: index("calendar_events_class_start_idx").on(table.classId, table.startAt),
+    startIdx: index("calendar_events_start_idx").on(table.startAt),
+    createdByIdx: index("calendar_events_created_by_idx").on(table.createdBy),
+  })
+);
+
+export const notificationPreferences = pgTable("notification_preferences", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  inAppPreferences: jsonb("in_app_preferences").$type<NotificationEventPreferenceMap>().notNull(),
+  emailPreferences: jsonb("email_preferences").$type<NotificationEventPreferenceMap>().notNull(),
+  ...timestamps,
+});
 
 export const resourceCategoryEnum = pgEnum("resource_category", [
   "lecture_notes",
@@ -582,6 +626,16 @@ export const classesRelations = relations(classes, ({ one, many }) => ({
   attendanceSessions: many(attendanceSessions),
   gradebookEntries: many(gradebookEntries),
   gradebookCategories: many(gradebookCategories),
+  calendarEvents: many(calendarEvents),
+}));
+
+export const calendarEventsRelations = relations(calendarEvents, ({ one }) => ({
+  class: one(classes, { fields: [calendarEvents.classId], references: [classes.id] }),
+  creator: one(user, { fields: [calendarEvents.createdBy], references: [user.id] }),
+}));
+
+export const notificationPreferencesRelations = relations(notificationPreferences, ({ one }) => ({
+  user: one(user, { fields: [notificationPreferences.userId], references: [user.id] }),
 }));
 
 export const assignmentsRelations = relations(assignments, ({ one, many }) => ({
@@ -683,6 +737,12 @@ export type NewSubject = typeof subjects.$inferInsert;
 
 export type Class = typeof classes.$inferSelect;
 export type NewClass = typeof classes.$inferInsert;
+
+export type CalendarEvent = typeof calendarEvents.$inferSelect;
+export type NewCalendarEvent = typeof calendarEvents.$inferInsert;
+
+export type NotificationPreferences = typeof notificationPreferences.$inferSelect;
+export type NewNotificationPreferences = typeof notificationPreferences.$inferInsert;
 
 export type Resource = typeof resources.$inferSelect;
 export type NewResource = typeof resources.$inferInsert;

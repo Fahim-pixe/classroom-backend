@@ -426,6 +426,38 @@ export const attendanceRecords = pgTable(
   })
 );
 
+export const attendanceCorrectionStatusEnum = pgEnum("attendance_correction_status", [
+  "pending",
+  "approved",
+  "rejected",
+]);
+
+export const attendanceCorrections = pgTable(
+  "attendance_corrections",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    attendanceRecordId: integer("attendance_record_id")
+      .notNull()
+      .references(() => attendanceRecords.id, { onDelete: "cascade" }),
+    studentId: text("student_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    requestedStatus: attendanceStatusEnum("requested_status").notNull(),
+    reason: text("reason").notNull(),
+    status: attendanceCorrectionStatusEnum("status").notNull().default("pending"),
+    reviewerId: text("reviewer_id").references(() => user.id, { onDelete: "restrict" }),
+    reviewNote: text("review_note"),
+    reviewedAt: timestamp("reviewed_at"),
+
+    ...timestamps,
+  },
+  (table) => ({
+    recordIdIdx: index("attendance_corrections_record_id_idx").on(table.attendanceRecordId),
+    studentStatusIdx: index("attendance_corrections_student_status_idx").on(table.studentId, table.status),
+    statusCreatedIdx: index("attendance_corrections_status_created_idx").on(table.status, table.createdAt),
+  })
+);
+
 export const gradebookEntries = pgTable(
   "gradebook_entries",
   {

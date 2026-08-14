@@ -175,6 +175,11 @@ export const CALENDAR_CONFIG = {
 export const ATTENDANCE_CONFIG = {
   riskThresholdPercent: 75,
   qualifyingStatuses: ["present", "late", "excused"],
+  correction: {
+    maximumReasonLength: 1_000,
+    maximumReviewNoteLength: 1_000,
+    reviewStatuses: ["approved", "rejected"],
+  },
 } as const;
 
 export const ATTENDANCE_ROUTE_PATHS = {
@@ -182,6 +187,8 @@ export const ATTENDANCE_ROUTE_PATHS = {
   sessions: "/sessions",
   accessibleClasses: "/classes",
   summary: "/summary",
+  corrections: "/corrections",
+  correctionById: "/corrections/:id",
 } as const;
 
 export const GRADEBOOK_ROUTE_PATHS = {

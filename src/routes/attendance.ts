@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 import { ATTENDANCE_CONFIG, ATTENDANCE_ROUTE_PATHS } from "../config/app.js";
 import { db } from "../db/index.js";
-import { attendanceRecords, attendanceSessions, classes, enrollments, subjects, user } from "../db/schema/index.js";
+import { attendanceCorrections, attendanceRecords, attendanceSessions, classes, enrollments, subjects, user } from "../db/schema/index.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -221,6 +221,142 @@ router.get(ATTENDANCE_ROUTE_PATHS.root, requireAuth, async (req: Request, res: R
   } catch (error) {
     console.error("GET /attendance error:", error);
     return res.status(500).json({ error: "Failed to fetch attendance" });
+  }
+});
+
+router.get(ATTENDANCE_ROUTE_PATHS.corrections, requireAuth, async (req: Request, res: Response) => {
+  try {
+    const viewer = req.user;
+    const classId = idOf(req.query.classId);
+    if (!viewer) return res.status(401).json({ error: "Unauthorized" });
+    if (viewer.role !== "student" && (!classId || !(await canTeach(classId, viewer.id, viewer.role)))) {
+      return res.status(403).json({ error: "You can only review corrections for assigned classes" });
+    }
+
+    const data = await db
+      .select({
+        id: attendanceCorrections.id,
+        attendanceRecordId: attendanceCorrections.attendanceRecordId,
+        studentId: attendanceCorrections.studentId,
+        studentName: user.name,
+        requestedStatus: attendanceCorrections.requestedStatus,
+        currentStatus: attendanceRecords.status,
+        reason: attendanceCorrections.reason,
+        status: attendanceCorrections.status,
+        reviewerId: attendanceCorrections.reviewerId,
+        reviewNote: attendanceCorrections.reviewNote,
+        reviewedAt: attendanceCorrections.reviewedAt,
+        createdAt: attendanceCorrections.createdAt,
+        sessionId: attendanceSessions.id,
+        sessionDate: attendanceSessions.sessionDate,
+        classId: attendanceSessions.classId,
+      })
+      .from(attendanceCorrections)
+      .innerJoin(attendanceRecords, eq(attendanceRecords.id, attendanceCorrections.attendanceRecordId))
+      .innerJoin(attendanceSessions, eq(attendanceSessions.id, attendanceRecords.sessionId))
+      .innerJoin(user, eq(user.id, attendanceCorrections.studentId))
+      .where(and(
+        viewer.role === "student" ? eq(attendanceCorrections.studentId, viewer.id) : undefined,
+        viewer.role === "student" && classId ? eq(attendanceSessions.classId, classId) : undefined,
+        viewer.role !== "student" ? eq(attendanceSessions.classId, classId as number) : undefined,
+      ))
+      .orderBy(desc(attendanceCorrections.createdAt));
+
+    return res.status(200).json({ data });
+  } catch (error) {
+    console.error("GET /attendance/corrections error:", error);
+    return res.status(500).json({ error: "Failed to fetch attendance corrections" });
+  }
+});
+
+router.post(ATTENDANCE_ROUTE_PATHS.corrections, requireAuth, requireRole(["student"]), async (req: Request, res: Response) => {
+  try {
+    const viewer = req.user;
+    const attendanceRecordId = idOf(req.body?.attendanceRecordId);
+    const requestedStatus = req.body?.requestedStatus;
+    const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, ATTENDANCE_CONFIG.correction.maximumReasonLength) : "";
+    const validStatuses = new Set<AttendanceStatus>(["present", "absent", "late", "excused"]);
+    if (!viewer || !attendanceRecordId || !validStatuses.has(requestedStatus) || !reason) {
+      return res.status(400).json({ error: "A record, requested status, and reason are required" });
+    }
+
+    const [record] = await db
+      .select({ id: attendanceRecords.id, studentId: attendanceRecords.studentId, classId: attendanceSessions.classId })
+      .from(attendanceRecords)
+      .innerJoin(attendanceSessions, eq(attendanceSessions.id, attendanceRecords.sessionId))
+      .where(eq(attendanceRecords.id, attendanceRecordId))
+      .limit(1);
+    if (!record || record.studentId !== viewer.id || !(await canAttend(record.classId, viewer.id, viewer.role))) {
+      return res.status(403).json({ error: "You can only request a correction for your own attendance record" });
+    }
+
+    const [pendingCorrection] = await db
+      .select({ id: attendanceCorrections.id })
+      .from(attendanceCorrections)
+      .where(and(eq(attendanceCorrections.attendanceRecordId, attendanceRecordId), eq(attendanceCorrections.status, "pending")))
+      .limit(1);
+    if (pendingCorrection) return res.status(409).json({ error: "A correction request is already pending for this record" });
+
+    const [correction] = await db
+      .insert(attendanceCorrections)
+      .values({ attendanceRecordId, studentId: viewer.id, requestedStatus, reason })
+      .returning();
+    return res.status(201).json({ data: correction });
+  } catch (error) {
+    console.error("POST /attendance/corrections error:", error);
+    return res.status(500).json({ error: "Failed to request an attendance correction" });
+  }
+});
+
+router.patch(ATTENDANCE_ROUTE_PATHS.correctionById, requireAuth, requireRole(["teacher", "admin"]), async (req: Request, res: Response) => {
+  try {
+    const viewer = req.user;
+    const correctionId = idOf(req.params.id);
+    const decision = req.body?.decision;
+    const reviewNote = typeof req.body?.reviewNote === "string" ? req.body.reviewNote.trim().slice(0, ATTENDANCE_CONFIG.correction.maximumReviewNoteLength) : null;
+    const validDecisions = new Set(ATTENDANCE_CONFIG.correction.reviewStatuses);
+    if (!viewer || !correctionId || !validDecisions.has(decision)) {
+      return res.status(400).json({ error: "A correction decision is required" });
+    }
+
+    const [correction] = await db
+      .select({
+        id: attendanceCorrections.id,
+        attendanceRecordId: attendanceCorrections.attendanceRecordId,
+        requestedStatus: attendanceCorrections.requestedStatus,
+        status: attendanceCorrections.status,
+        classId: attendanceSessions.classId,
+      })
+      .from(attendanceCorrections)
+      .innerJoin(attendanceRecords, eq(attendanceRecords.id, attendanceCorrections.attendanceRecordId))
+      .innerJoin(attendanceSessions, eq(attendanceSessions.id, attendanceRecords.sessionId))
+      .where(eq(attendanceCorrections.id, correctionId))
+      .limit(1);
+    if (!correction) return res.status(404).json({ error: "Attendance correction not found" });
+    if (correction.status !== "pending") return res.status(409).json({ error: "This correction has already been reviewed" });
+    if (!(await canTeach(correction.classId, viewer.id, viewer.role))) return res.status(403).json({ error: "You can only review corrections for assigned classes" });
+
+    const reviewedAt = new Date();
+    const updated = await db.transaction(async (tx) => {
+      const [reviewedCorrection] = await tx
+        .update(attendanceCorrections)
+        .set({ status: decision, reviewerId: viewer.id, reviewNote, reviewedAt, updatedAt: reviewedAt })
+        .where(and(eq(attendanceCorrections.id, correctionId), eq(attendanceCorrections.status, "pending")))
+        .returning();
+      if (!reviewedCorrection) return null;
+      if (decision === "approved") {
+        await tx
+          .update(attendanceRecords)
+          .set({ status: correction.requestedStatus, updatedAt: reviewedAt })
+          .where(eq(attendanceRecords.id, correction.attendanceRecordId));
+      }
+      return reviewedCorrection;
+    });
+    if (!updated) return res.status(409).json({ error: "This correction has already been reviewed" });
+    return res.status(200).json({ data: updated });
+  } catch (error) {
+    console.error("PATCH /attendance/corrections/:id error:", error);
+    return res.status(500).json({ error: "Failed to review attendance correction" });
   }
 });
 

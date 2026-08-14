@@ -458,6 +458,24 @@ export const attendanceCorrections = pgTable(
   })
 );
 
+export const gradebookCategories = pgTable(
+  "gradebook_categories",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    classId: integer("class_id")
+      .notNull()
+      .references(() => classes.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 120 }).notNull(),
+    weight: integer("weight").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+
+    ...timestamps,
+  },
+  (table) => ({
+    classActiveIdx: index("gradebook_categories_class_active_idx").on(table.classId, table.isActive),
+  })
+);
+
 export const gradebookEntries = pgTable(
   "gradebook_entries",
   {
@@ -471,15 +489,39 @@ export const gradebookEntries = pgTable(
     studentId: text("student_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    categoryId: integer("category_id").references(() => gradebookCategories.id, { onDelete: "set null" }),
     title: varchar("title", { length: 200 }).notNull(),
     points: integer("points").notNull(),
     maxPoints: integer("max_points").notNull(),
     feedback: text("feedback"),
+    isReleased: boolean("is_released").notNull().default(true),
+    releasedAt: timestamp("released_at"),
 
     ...timestamps,
   },
   (table) => ({
     classStudentIdx: index("gradebook_entries_class_student_idx").on(table.classId, table.studentId),
+    classReleaseIdx: index("gradebook_entries_class_release_idx").on(table.classId, table.isReleased),
+    categoryIdx: index("gradebook_entries_category_idx").on(table.categoryId),
+  })
+);
+
+export const gradebookEntryAudits = pgTable(
+  "gradebook_entry_audits",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    gradebookEntryId: integer("gradebook_entry_id")
+      .notNull()
+      .references(() => gradebookEntries.id, { onDelete: "cascade" }),
+    actorId: text("actor_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    action: varchar("action", { length: 32 }).notNull(),
+    details: jsonb("details").notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    entryCreatedIdx: index("gradebook_entry_audits_entry_created_idx").on(table.gradebookEntryId, table.createdAt),
   })
 );
 
@@ -533,6 +575,7 @@ export const classesRelations = relations(classes, ({ one, many }) => ({
   assignments: many(assignments),
   attendanceSessions: many(attendanceSessions),
   gradebookEntries: many(gradebookEntries),
+  gradebookCategories: many(gradebookCategories),
 }));
 
 export const assignmentsRelations = relations(assignments, ({ one, many }) => ({
@@ -597,10 +640,22 @@ export const attendanceRecordsRelations = relations(attendanceRecords, ({ one })
   student: one(user, { fields: [attendanceRecords.studentId], references: [user.id] }),
 }));
 
-export const gradebookEntriesRelations = relations(gradebookEntries, ({ one }) => ({
+export const gradebookCategoriesRelations = relations(gradebookCategories, ({ one, many }) => ({
+  class: one(classes, { fields: [gradebookCategories.classId], references: [classes.id] }),
+  entries: many(gradebookEntries),
+}));
+
+export const gradebookEntriesRelations = relations(gradebookEntries, ({ one, many }) => ({
   class: one(classes, { fields: [gradebookEntries.classId], references: [classes.id] }),
   teacher: one(user, { fields: [gradebookEntries.teacherId], references: [user.id] }),
   student: one(user, { fields: [gradebookEntries.studentId], references: [user.id] }),
+  category: one(gradebookCategories, { fields: [gradebookEntries.categoryId], references: [gradebookCategories.id] }),
+  audits: many(gradebookEntryAudits),
+}));
+
+export const gradebookEntryAuditsRelations = relations(gradebookEntryAudits, ({ one }) => ({
+  gradebookEntry: one(gradebookEntries, { fields: [gradebookEntryAudits.gradebookEntryId], references: [gradebookEntries.id] }),
+  actor: one(user, { fields: [gradebookEntryAudits.actorId], references: [user.id] }),
 }));
 
 export const enrollmentsRelations = relations(enrollments, ({ one }) => ({
@@ -646,5 +701,11 @@ export type NewAttendanceSession = typeof attendanceSessions.$inferInsert;
 export type AttendanceRecord = typeof attendanceRecords.$inferSelect;
 export type NewAttendanceRecord = typeof attendanceRecords.$inferInsert;
 
+export type GradebookCategory = typeof gradebookCategories.$inferSelect;
+export type NewGradebookCategory = typeof gradebookCategories.$inferInsert;
+
 export type GradebookEntry = typeof gradebookEntries.$inferSelect;
 export type NewGradebookEntry = typeof gradebookEntries.$inferInsert;
+
+export type GradebookEntryAudit = typeof gradebookEntryAudits.$inferSelect;
+export type NewGradebookEntryAudit = typeof gradebookEntryAudits.$inferInsert;

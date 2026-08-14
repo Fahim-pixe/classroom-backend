@@ -191,11 +191,31 @@ export const ATTENDANCE_ROUTE_PATHS = {
   correctionById: "/corrections/:id",
 } as const;
 
+export const GRADEBOOK_WORKFLOW_CONFIG = {
+  category: {
+    maximumTitleLength: 120,
+    minimumWeight: 1,
+    maximumWeight: 100,
+  },
+  entry: {
+    maximumTitleLength: 200,
+    maximumFeedbackLength: 5_000,
+  },
+  export: {
+    contentType: "text/csv; charset=utf-8",
+    attachmentFileName: "gradebook.csv",
+  },
+} as const;
+
 export const GRADEBOOK_ROUTE_PATHS = {
   root: "/",
   accessibleClasses: "/classes",
   summary: "/summary",
+  categories: "/categories",
   entryById: "/:id",
+  entryReleaseById: "/:id/release",
+  entryAuditById: "/:id/audit",
+  export: "/export",
 } as const;
 
 export const API_PATHS = {

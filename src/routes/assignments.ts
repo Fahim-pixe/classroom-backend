@@ -2,8 +2,17 @@ import express from "express";
 import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "../db/index.js";
-import { assignments, classes, enrollments, storageAssets, submissions, user } from "../db/schema/index.js";
-import { API_PATHS, STORAGE_CONFIG } from "../config/app.js";
+import {
+  assignments,
+  classes,
+  enrollments,
+  storageAssets,
+  submissions,
+  user,
+  type AssignmentRubricCriterion,
+  type SubmissionRubricScore,
+} from "../db/schema/index.js";
+import { API_PATHS, ASSIGNMENT_WORKFLOW_CONFIG, STORAGE_CONFIG } from "../config/app.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -49,11 +58,66 @@ const getOwnedActiveAttachmentAsset = async ({
 
 const getAssignment = async (id: number) => {
   const [assignment] = await db
-    .select({ id: assignments.id, classId: assignments.classId, maxPoints: assignments.maxPoints })
+    .select({
+      id: assignments.id,
+      classId: assignments.classId,
+      maxPoints: assignments.maxPoints,
+      rubric: assignments.rubric,
+      allowResubmissions: assignments.allowResubmissions,
+      resubmissionDeadline: assignments.resubmissionDeadline,
+    })
     .from(assignments)
     .where(eq(assignments.id, id))
     .limit(1);
   return assignment;
+};
+
+const parseOptionalTimestamp = (value: unknown) => {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
+const normalizeRubric = (value: unknown, maxPoints: number): AssignmentRubricCriterion[] | null => {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > ASSIGNMENT_WORKFLOW_CONFIG.rubric.maximumCriteria) return null;
+
+  const rubric = value.map((criterion, index) => {
+    const record = criterion && typeof criterion === "object" ? criterion as Record<string, unknown> : {};
+    const title = textValue(record.title, ASSIGNMENT_WORKFLOW_CONFIG.rubric.maximumTitleLength);
+    const description = textValue(record.description, ASSIGNMENT_WORKFLOW_CONFIG.rubric.maximumDescriptionLength) || undefined;
+    const criterionPoints = Number(record.maxPoints);
+    if (!title || !Number.isInteger(criterionPoints) || criterionPoints <= 0) return null;
+    return { id: `criterion-${index + 1}`, title, description, maxPoints: criterionPoints };
+  });
+
+  if (rubric.some((criterion) => criterion === null)) return null;
+  const normalized = rubric as AssignmentRubricCriterion[];
+  const totalPoints = normalized.reduce((total, criterion) => total + criterion.maxPoints, 0);
+  return normalized.length === 0 || totalPoints === maxPoints ? normalized : null;
+};
+
+const normalizeRubricScores = (value: unknown, rubric: AssignmentRubricCriterion[]): SubmissionRubricScore[] | null => {
+  if (rubric.length === 0) return [];
+  if (!Array.isArray(value) || value.length !== rubric.length) return null;
+
+  const submittedScores = new Map<string, unknown>();
+  for (const score of value) {
+    const record = score && typeof score === "object" ? score as Record<string, unknown> : {};
+    const criterionId = textValue(record.criterionId, ASSIGNMENT_WORKFLOW_CONFIG.rubric.maximumTitleLength);
+    if (!criterionId || submittedScores.has(criterionId)) return null;
+    submittedScores.set(criterionId, record);
+  }
+
+  const normalized = rubric.map((criterion) => {
+    const record = submittedScores.get(criterion.id) as Record<string, unknown> | undefined;
+    const points = Number(record?.points);
+    const feedback = textValue(record?.feedback, ASSIGNMENT_WORKFLOW_CONFIG.rubric.maximumDescriptionLength) || undefined;
+    if (!record || !Number.isFinite(points) || points < 0 || points > criterion.maxPoints) return null;
+    return { criterionId: criterion.id, points, feedback };
+  });
+
+  return normalized.some((score) => score === null) ? null : normalized as SubmissionRubricScore[];
 };
 
 const canAccessClass = async (classId: number, userId: string, role: string) => {
@@ -89,6 +153,9 @@ router.get("/", requireAuth, async (req, res) => {
         description: assignments.description,
         dueAt: assignments.dueAt,
         maxPoints: assignments.maxPoints,
+        rubric: assignments.rubric,
+        allowResubmissions: assignments.allowResubmissions,
+        resubmissionDeadline: assignments.resubmissionDeadline,
         attachmentUrl: assignments.attachmentUrl,
         attachmentName: assignments.attachmentName,
         attachmentMimeType: assignments.attachmentMimeType,
@@ -107,6 +174,7 @@ router.get("/", requireAuth, async (req, res) => {
           submittedAt: submissions.submittedAt,
           grade: submissions.grade,
           feedback: submissions.feedback,
+          rubricScores: submissions.rubricScores,
         },
       })
       .from(assignments)
@@ -145,6 +213,9 @@ router.get("/:id", requireAuth, async (req, res) => {
         description: assignments.description,
         dueAt: assignments.dueAt,
         maxPoints: assignments.maxPoints,
+        rubric: assignments.rubric,
+        allowResubmissions: assignments.allowResubmissions,
+        resubmissionDeadline: assignments.resubmissionDeadline,
         attachmentUrl: assignments.attachmentUrl,
         attachmentName: assignments.attachmentName,
         attachmentMimeType: assignments.attachmentMimeType,
@@ -172,7 +243,10 @@ router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res
     const title = textValue(req.body?.title, 200);
     const description = textValue(req.body?.description, 10000);
     const maxPoints = Number(req.body?.maxPoints ?? 100);
-    const dueAt = req.body?.dueAt ? new Date(req.body.dueAt) : null;
+    const dueAt = parseOptionalTimestamp(req.body?.dueAt);
+    const allowResubmissions = req.body?.allowResubmissions === true;
+    const resubmissionDeadline = parseOptionalTimestamp(req.body?.resubmissionDeadline);
+    const rubric = normalizeRubric(req.body?.rubric, maxPoints);
     const attachmentUrl = textValue(req.body?.attachmentUrl, 2000) || null;
     const attachmentName = textValue(req.body?.attachmentName, 255) || null;
     const attachmentMimeType = textValue(req.body?.attachmentMimeType, 120) || null;
@@ -182,7 +256,12 @@ router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res
     if (!classId || !title || !description || !Number.isInteger(maxPoints) || maxPoints <= 0) {
       return res.status(400).json({ error: "classId, title, description, and positive maxPoints are required" });
     }
-    if (dueAt && Number.isNaN(dueAt.getTime())) return res.status(400).json({ error: "Invalid dueAt" });
+    if (dueAt === undefined) return res.status(400).json({ error: "Invalid dueAt" });
+    if (resubmissionDeadline === undefined) return res.status(400).json({ error: "Invalid resubmissionDeadline" });
+    if (!rubric) return res.status(400).json({ error: "Rubric criteria must be valid and total the assignment maximum points" });
+    if (resubmissionDeadline && !allowResubmissions) {
+      return res.status(400).json({ error: "A resubmission deadline requires resubmissions to be enabled" });
+    }
     if (req.user?.role === "teacher" && !(await canAccessClass(classId, req.user.id, "teacher"))) {
       return res.status(403).json({ error: "You can only create assignments for your assigned classes" });
     }
@@ -211,6 +290,9 @@ router.post("/", requireAuth, requireRole(["teacher", "admin"]), async (req, res
         description,
         maxPoints,
         dueAt,
+        rubric,
+        allowResubmissions,
+        resubmissionDeadline,
         attachmentAssetId: confirmedAttachment?.id ?? null,
         attachmentUrl: confirmedAttachment ? storageRedirectPath(confirmedAttachment.id) : attachmentUrl,
         attachmentName: confirmedAttachment?.fileName ?? attachmentName,
@@ -268,6 +350,13 @@ router.post("/:id/submissions", requireAuth, requireRole(["student"]), async (re
       .where(and(eq(submissions.assignmentId, assignmentId), eq(submissions.studentId, req.user!.id)))
       .limit(1);
 
+    if (existing && !assignment.allowResubmissions) {
+      return res.status(409).json({ error: "Resubmissions are not enabled for this assignment" });
+    }
+    if (existing && assignment.resubmissionDeadline && assignment.resubmissionDeadline.getTime() < Date.now()) {
+      return res.status(422).json({ error: "The resubmission deadline has passed" });
+    }
+
     const [saved] = existing
       ? await db.update(submissions).set({
         content,
@@ -277,6 +366,9 @@ router.post("/:id/submissions", requireAuth, requireRole(["student"]), async (re
         attachmentMimeType: confirmedAttachment?.mimeType ?? attachmentMimeType,
         attachmentSizeBytes: confirmedAttachment?.fileSizeBytes ?? attachmentSizeBytes,
         submittedAt: new Date(),
+        grade: null,
+        feedback: null,
+        rubricScores: [],
         updatedAt: new Date(),
       }).where(eq(submissions.id, existing.id)).returning()
       : await db.insert(submissions).values({
@@ -320,6 +412,7 @@ router.get("/:id/submissions", requireAuth, async (req, res) => {
         submittedAt: submissions.submittedAt,
         grade: submissions.grade,
         feedback: submissions.feedback,
+        rubricScores: submissions.rubricScores,
         attachmentUrl: submissions.attachmentUrl,
         attachmentName: submissions.attachmentName,
         attachmentMimeType: submissions.attachmentMimeType,
@@ -343,17 +436,25 @@ router.patch("/:assignmentId/submissions/:submissionId", requireAuth, requireRol
   try {
     const assignmentId = parseId(req.params.assignmentId);
     const submissionId = parseId(req.params.submissionId);
-    const grade = Number(req.body?.grade);
     const feedback = typeof req.body?.feedback === "string" ? req.body.feedback.trim().slice(0, 5000) : null;
-    if (!assignmentId || !submissionId || !Number.isInteger(grade) || grade < 0) return res.status(400).json({ error: "Valid assignment, submission, and grade are required" });
+    if (!assignmentId || !submissionId) return res.status(400).json({ error: "Valid assignment and submission identifiers are required" });
 
     const assignment = await getAssignment(assignmentId);
     if (!assignment || (req.user?.role === "teacher" && !(await canAccessClass(assignment.classId, req.user.id, "teacher")))) {
       return res.status(403).json({ error: "You cannot grade this assignment" });
     }
-    if (grade > assignment.maxPoints) return res.status(400).json({ error: "Grade cannot exceed maxPoints" });
 
-    const [updated] = await db.update(submissions).set({ grade, feedback, updatedAt: new Date() }).where(and(eq(submissions.id, submissionId), eq(submissions.assignmentId, assignmentId))).returning();
+    const rubricScores = normalizeRubricScores(req.body?.rubricScores, assignment.rubric);
+    if (!rubricScores) return res.status(400).json({ error: "Each rubric criterion requires a valid score within its point range" });
+
+    const grade = assignment.rubric.length > 0
+      ? rubricScores.reduce((total, score) => total + score.points, 0)
+      : Number(req.body?.grade);
+    if (!Number.isInteger(grade) || grade < 0 || grade > assignment.maxPoints) {
+      return res.status(400).json({ error: "Grade must be a whole number within the assignment point range" });
+    }
+
+    const [updated] = await db.update(submissions).set({ grade, feedback, rubricScores, updatedAt: new Date() }).where(and(eq(submissions.id, submissionId), eq(submissions.assignmentId, assignmentId))).returning();
     if (!updated) return res.status(404).json({ error: "Submission not found" });
     return res.json({ data: updated });
   } catch (error) {

@@ -71,6 +71,13 @@
       "when": 1786487324612,
       "tag": "0009_nosy_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786701316130,
+      "tag": "0010_cold_hammerhead",
+      "breakpoints": true
     }
   ]
 }

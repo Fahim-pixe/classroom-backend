@@ -22,6 +22,19 @@ const timestamps = {
     .notNull(),
 };
 
+export type AssignmentRubricCriterion = {
+  id: string;
+  title: string;
+  description?: string;
+  maxPoints: number;
+};
+
+export type SubmissionRubricScore = {
+  criterionId: string;
+  points: number;
+  feedback?: string;
+};
+
 export const classStatusEnum = pgEnum("class_status", [
   "active",
   "inactive",
@@ -313,6 +326,9 @@ export const assignments = pgTable(
     description: text("description").notNull(),
     dueAt: timestamp("due_at"),
     maxPoints: integer("max_points").notNull().default(100),
+    rubric: jsonb("rubric").$type<AssignmentRubricCriterion[]>().notNull().default([]),
+    allowResubmissions: boolean("allow_resubmissions").notNull().default(false),
+    resubmissionDeadline: timestamp("resubmission_deadline"),
     attachmentUrl: text("attachment_url"),
     attachmentAssetId: uuid("attachment_asset_id").references(() => storageAssets.id, { onDelete: "set null" }),
     attachmentName: varchar("attachment_name", { length: 255 }),
@@ -346,6 +362,7 @@ export const submissions = pgTable(
     submittedAt: timestamp("submitted_at").defaultNow().notNull(),
     grade: integer("grade"),
     feedback: text("feedback"),
+    rubricScores: jsonb("rubric_scores").$type<SubmissionRubricScore[]>().notNull().default([]),
 
     ...timestamps,
   },

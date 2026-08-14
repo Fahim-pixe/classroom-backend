@@ -142,6 +142,17 @@ export const STORAGE_CONFIG = {
   },
 } as const;
 
+export const ASSIGNMENT_WORKFLOW_CONFIG = {
+  rubric: {
+    maximumCriteria: 12,
+    maximumTitleLength: 120,
+    maximumDescriptionLength: 500,
+  },
+  resubmission: {
+    defaultAllowed: false,
+  },
+} as const;
+
 export const RESOURCE_LIST_CONFIG = {
   defaultPage: 1,
   defaultPageSize: 24,

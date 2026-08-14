@@ -9,6 +9,7 @@ import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import { toNodeHandler } from "better-auth/node";
 import { requireAuth } from "./middleware/auth.js";
+import { requestMonitoring } from "./middleware/monitoring.js";
 import subjectsRouter from "./routes/subjects.js";
 import usersRouter from "./routes/users.js";
 import classesRouter from "./routes/classes.js";
@@ -22,6 +23,7 @@ import gradebookRouter from "./routes/gradebook.js";
 import resourcesRouter from "./routes/resources.js";
 import calendarRouter from "./routes/calendar.js";
 import storageRouter from "./routes/storage.js";
+import monitoringRouter from "./routes/monitoring.js";
 
 import { auth } from "./lib/auth.js";
 import { API_PATHS, SERVER_CONFIG } from "./config/app.js";
@@ -79,6 +81,7 @@ app.use(
 );
 
 app.use(helmet());
+app.use(requestMonitoring);
 
 // Better Auth remains a dedicated boundary. Its rate limit is intentionally tighter than application APIs.
 app.use(API_PATHS.authBase, authRateLimiter);
@@ -107,6 +110,7 @@ app.use(API_PATHS.prefixed.gradebook, requireAuth, gradebookRouter);
 app.use(API_PATHS.prefixed.resources, requireAuth, resourcesRouter);
 app.use(API_PATHS.prefixed.calendar, requireAuth, calendarRouter);
 app.use(API_PATHS.prefixed.storage, requireAuth, storageRouter);
+app.use(API_PATHS.prefixed.monitoring, requireAuth, monitoringRouter);
 
 // Legacy root aliases remain available for existing clients but now enforce the same session boundary.
 app.use(API_PATHS.root.subjects, requireAuth, subjectsRouter);
@@ -122,6 +126,7 @@ app.use(API_PATHS.root.gradebook, requireAuth, gradebookRouter);
 app.use(API_PATHS.root.resources, requireAuth, resourcesRouter);
 app.use(API_PATHS.root.calendar, requireAuth, calendarRouter);
 app.use(API_PATHS.root.storage, requireAuth, storageRouter);
+app.use(API_PATHS.root.monitoring, requireAuth, monitoringRouter);
 
 app.get("/", (req, res) => {
   res.send("Backend server is running!");
@@ -134,7 +139,7 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
     return res.status(403).json({ error: SERVER_CONFIG.corsErrorMessage });
   }
 
-  console.error("Unhandled request error", error);
+  console.error("Unhandled request error", { requestId: _req.requestId, error });
   return res.status(500).json({ error: SERVER_CONFIG.genericErrorMessage });
 };
 

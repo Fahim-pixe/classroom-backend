@@ -25,6 +25,19 @@ export const SERVER_CONFIG = {
     limit: 20,
     message: "Too many authentication attempts. Please try again later.",
   },
+  monitoring: {
+    enabled: process.env.MONITORING_ENABLED !== "false",
+    requestIdHeader: "x-request-id",
+    slowRequestThresholdMilliseconds: Number(process.env.MONITORING_SLOW_REQUEST_THRESHOLD_MS ?? 1_000),
+    webVitalMaximumValue: Number(process.env.MONITORING_WEB_VITAL_MAXIMUM_VALUE ?? 60_000),
+    webVitalMetricNames: ["CLS", "FCP", "INP", "LCP", "TTFB"],
+    webVitalRatings: ["good", "needs-improvement", "poor"],
+    eventNames: {
+      requestCompleted: "api_request_completed",
+      requestFailed: "api_request_failed",
+      webVitalReceived: "web_vital_received",
+    },
+  },
 } as const;
 
 export const CLOUDINARY_CONFIG = {
@@ -138,6 +151,11 @@ export const RESOURCE_LIST_CONFIG = {
   },
 } as const;
 
+export const MONITORING_ROUTE_PATHS = {
+  root: "/",
+  webVitals: "/web-vitals",
+} as const;
+
 export const CALENDAR_CONFIG = {
   weekStartsOn: 1,
   weekdayNames: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
@@ -179,6 +197,7 @@ export const API_PATHS = {
     resources: "/api/resources",
     calendar: "/api/calendar",
     storage: "/api/storage",
+    monitoring: "/api/monitoring",
   },
   root: {
     subjects: "/subjects",
@@ -194,5 +213,6 @@ export const API_PATHS = {
     resources: "/resources",
     calendar: "/calendar",
     storage: "/storage",
+    monitoring: "/monitoring",
   },
 } as const;

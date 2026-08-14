@@ -256,6 +256,17 @@ export const ATTENDANCE_ROUTE_PATHS = {
   correctionById: "/corrections/:id",
 } as const;
 
+export const PRODUCTIVITY_REPORTING_CONFIG = {
+  atRiskStudents: {
+    attendanceThresholdPercent: ATTENDANCE_CONFIG.riskThresholdPercent,
+    minimumAttendanceRecords: 2,
+    maximumAlerts: 25,
+  },
+  deadlines: {
+    upcomingWindowDays: 7,
+  },
+} as const;
+
 export const GRADEBOOK_WORKFLOW_CONFIG = {
   category: {
     maximumTitleLength: 120,

@@ -1,7 +1,7 @@
 import express from "express";
-import { and, asc, desc, eq, getTableColumns, gte, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, isNull, lte, sql } from "drizzle-orm";
 
-import { CALENDAR_CONFIG } from "../config/app.js";
+import { CALENDAR_CONFIG, PRODUCTIVITY_REPORTING_CONFIG } from "../config/app.js";
 import { db } from "../db/index.js";
 import {
   announcements,
@@ -11,6 +11,7 @@ import {
   classes,
   departments,
   enrollments,
+  gradebookEntries,
   subjects,
   submissions,
   user,
@@ -153,8 +154,10 @@ router.get("/dashboard", requireAuth, async (req, res) => {
   try {
     const viewer = req.user!;
     const now = new Date();
+    const deadlineWindowEnd = new Date(now);
+    deadlineWindowEnd.setDate(now.getDate() + PRODUCTIVITY_REPORTING_CONFIG.deadlines.upcomingWindowDays);
     if (viewer.role === "admin") {
-      const [students, faculty, activeClasses, subjectCount, studentDistribution, enrollmentTrend, recentClasses, recentEnrollments, recentSubjects, recentAssignments] = await Promise.all([
+      const [students, faculty, activeClasses, subjectCount, studentDistribution, enrollmentTrend, recentClasses, recentEnrollments, recentSubjects, recentAssignments, subjectDistribution, atRiskStudents] = await Promise.all([
         db.select({ value: sql<number>`count(*)` }).from(user).where(eq(user.role, "student")),
         db.select({ value: sql<number>`count(*)` }).from(user).where(eq(user.role, "teacher")),
         db.select({ value: sql<number>`count(*)` }).from(classes).where(eq(classes.status, "active")),
@@ -174,6 +177,24 @@ router.get("/dashboard", requireAuth, async (req, res) => {
           .from(enrollments).innerJoin(user, eq(user.id, enrollments.studentId)).innerJoin(classes, eq(classes.id, enrollments.classId)).orderBy(desc(enrollments.createdAt)).limit(5),
         db.select({ id: subjects.id, name: subjects.name, updatedAt: subjects.updatedAt }).from(subjects).orderBy(desc(subjects.updatedAt)).limit(5),
         db.select({ id: assignments.id, title: assignments.title, createdAt: assignments.createdAt }).from(assignments).orderBy(desc(assignments.createdAt)).limit(5),
+        db.select({ departmentId: departments.id, departmentName: departments.name, subjects: sql<number>`count(${subjects.id})` })
+          .from(departments)
+          .leftJoin(subjects, eq(subjects.departmentId, departments.id))
+          .groupBy(departments.id, departments.name)
+          .orderBy(asc(departments.name)),
+        db.select({
+          id: user.id,
+          name: user.name,
+          attendanceRate: sql<number>`round(100.0 * sum(case when ${attendanceRecords.status} in ('present', 'late', 'excused') then 1 else 0 end) / nullif(count(${attendanceRecords.id}), 0))`,
+          attendanceRecords: sql<number>`count(${attendanceRecords.id})`,
+        })
+          .from(user)
+          .innerJoin(attendanceRecords, eq(attendanceRecords.studentId, user.id))
+          .where(eq(user.role, "student"))
+          .groupBy(user.id, user.name)
+          .having(sql`count(${attendanceRecords.id}) >= ${PRODUCTIVITY_REPORTING_CONFIG.atRiskStudents.minimumAttendanceRecords} and 100.0 * sum(case when ${attendanceRecords.status} in ('present', 'late', 'excused') then 1 else 0 end) / nullif(count(${attendanceRecords.id}), 0) < ${PRODUCTIVITY_REPORTING_CONFIG.atRiskStudents.attendanceThresholdPercent}`)
+          .orderBy(asc(sql`100.0 * sum(case when ${attendanceRecords.status} in ('present', 'late', 'excused') then 1 else 0 end) / nullif(count(${attendanceRecords.id}), 0)`))
+          .limit(PRODUCTIVITY_REPORTING_CONFIG.atRiskStudents.maximumAlerts),
       ]);
 
       const activity = [
@@ -194,13 +215,21 @@ router.get("/dashboard", requireAuth, async (req, res) => {
         },
         studentDistribution,
         enrollmentTrend,
+        productivity: {
+          subjectDistribution,
+          atRiskStudents: atRiskStudents.map((student) => ({
+            ...student,
+            attendanceRate: Number(student.attendanceRate ?? 0),
+            attendanceRecords: Number(student.attendanceRecords ?? 0),
+          })),
+        },
         recentActivity: activity,
         upcomingEvents: [],
       }});
     }
 
     if (viewer.role === "teacher") {
-      const [myClasses, studentCount, pendingAssignments, recentAssignments, recentAnnouncements] = await Promise.all([
+      const [myClasses, studentCount, pendingAssignments, recentAssignments, recentAnnouncements, assignmentCompletionByClass, attendanceByClass, assignedSubjects] = await Promise.all([
         db.select({ id: classes.id, name: classes.name, schedules: classes.schedules, subjectName: subjects.name })
           .from(classes).innerJoin(subjects, eq(subjects.id, classes.subjectId))
           .where(and(eq(classes.teacherId, viewer.id), eq(classes.status, "active"))).orderBy(asc(classes.name)),
@@ -208,13 +237,55 @@ router.get("/dashboard", requireAuth, async (req, res) => {
         db.select({ value: sql<number>`count(*)` }).from(assignments).where(and(eq(assignments.authorId, viewer.id), gte(assignments.dueAt, now))),
         db.select({ id: assignments.id, title: assignments.title, dueAt: assignments.dueAt, className: classes.name }).from(assignments).innerJoin(classes, eq(classes.id, assignments.classId)).where(eq(assignments.authorId, viewer.id)).orderBy(desc(assignments.createdAt)).limit(6),
         db.select({ id: announcements.id, title: announcements.title, createdAt: announcements.createdAt, className: classes.name }).from(announcements).innerJoin(classes, eq(classes.id, announcements.classId)).where(eq(announcements.authorId, viewer.id)).orderBy(desc(announcements.createdAt)).limit(5),
+        db.select({
+          classId: classes.id,
+          className: classes.name,
+          expectedSubmissions: sql<number>`count(distinct case when ${assignments.id} is not null and ${enrollments.studentId} is not null then ${assignments.id}::text || ':' || ${enrollments.studentId} end)`,
+          completedSubmissions: sql<number>`count(distinct ${submissions.id})`,
+          completionRate: sql<number>`coalesce(round(100.0 * count(distinct ${submissions.id}) / nullif(count(distinct case when ${assignments.id} is not null and ${enrollments.studentId} is not null then ${assignments.id}::text || ':' || ${enrollments.studentId} end), 0)), 0)`,
+        })
+          .from(classes)
+          .leftJoin(assignments, eq(assignments.classId, classes.id))
+          .leftJoin(enrollments, eq(enrollments.classId, classes.id))
+          .leftJoin(submissions, and(eq(submissions.assignmentId, assignments.id), eq(submissions.studentId, enrollments.studentId)))
+          .where(and(eq(classes.teacherId, viewer.id), eq(classes.status, "active")))
+          .groupBy(classes.id, classes.name)
+          .orderBy(asc(classes.name)),
+        db.select({
+          classId: classes.id,
+          className: classes.name,
+          recordedSessions: sql<number>`count(distinct ${attendanceSessions.id})`,
+          attendanceRate: sql<number>`coalesce(round(100.0 * sum(case when ${attendanceRecords.status} in ('present', 'late', 'excused') then 1 else 0 end) / nullif(count(${attendanceRecords.id}), 0)), 0)`,
+        })
+          .from(classes)
+          .leftJoin(attendanceSessions, eq(attendanceSessions.classId, classes.id))
+          .leftJoin(attendanceRecords, eq(attendanceRecords.sessionId, attendanceSessions.id))
+          .where(and(eq(classes.teacherId, viewer.id), eq(classes.status, "active")))
+          .groupBy(classes.id, classes.name)
+          .orderBy(asc(classes.name)),
+        db.select({ value: sql<number>`count(distinct ${classes.subjectId})` })
+          .from(classes)
+          .where(and(eq(classes.teacherId, viewer.id), eq(classes.status, "active"))),
       ]);
       return res.json({ data: {
         role: "teacher",
-        metrics: { myClasses: myClasses.length, myStudents: Number(studentCount[0]?.value ?? 0), todaysClasses: 0, pendingWork: Number(pendingAssignments[0]?.value ?? 0) },
+        metrics: { myClasses: myClasses.length, myStudents: Number(studentCount[0]?.value ?? 0), assignedSubjects: Number(assignedSubjects[0]?.value ?? 0), todaysClasses: 0, pendingWork: Number(pendingAssignments[0]?.value ?? 0) },
         todaySchedule: myClasses,
         pendingAssignments: recentAssignments,
         recentAnnouncements,
+        productivity: {
+          assignmentCompletionByClass: assignmentCompletionByClass.map((summary) => ({
+            ...summary,
+            expectedSubmissions: Number(summary.expectedSubmissions ?? 0),
+            completedSubmissions: Number(summary.completedSubmissions ?? 0),
+            completionRate: Number(summary.completionRate ?? 0),
+          })),
+          attendanceByClass: attendanceByClass.map((summary) => ({
+            ...summary,
+            recordedSessions: Number(summary.recordedSessions ?? 0),
+            attendanceRate: Number(summary.attendanceRate ?? 0),
+          })),
+        },
         studentDistribution: [],
         enrollmentTrend: [],
         recentActivity: [],
@@ -222,7 +293,7 @@ router.get("/dashboard", requireAuth, async (req, res) => {
       }});
     }
 
-    const [myClasses, attendance, upcomingAssignments, pendingWork, recentAnnouncements] = await Promise.all([
+    const [myClasses, attendance, upcomingAssignments, pendingWork, recentAnnouncements, progressByClass, upcomingDeadlineSummary] = await Promise.all([
       db.select({ id: classes.id, name: classes.name, schedules: classes.schedules, subjectName: subjects.name })
         .from(enrollments).innerJoin(classes, eq(classes.id, enrollments.classId)).innerJoin(subjects, eq(subjects.id, classes.subjectId))
         .where(and(eq(enrollments.studentId, viewer.id), eq(classes.status, "active"))).orderBy(asc(classes.name)),
@@ -251,6 +322,26 @@ router.get("/dashboard", requireAuth, async (req, res) => {
       db.select({ id: announcements.id, title: announcements.title, createdAt: announcements.createdAt, className: classes.name })
         .from(announcements).innerJoin(classes, eq(classes.id, announcements.classId)).innerJoin(enrollments, eq(enrollments.classId, classes.id))
         .where(eq(enrollments.studentId, viewer.id)).orderBy(desc(announcements.createdAt)).limit(5),
+      db.select({
+        classId: classes.id,
+        className: classes.name,
+        releasedEntries: sql<number>`count(${gradebookEntries.id})`,
+        progressPercent: sql<number>`coalesce(round(100.0 * sum(${gradebookEntries.points}) / nullif(sum(${gradebookEntries.maxPoints}), 0)), 0)`,
+      })
+        .from(gradebookEntries)
+        .innerJoin(classes, eq(classes.id, gradebookEntries.classId))
+        .where(and(eq(gradebookEntries.studentId, viewer.id), eq(gradebookEntries.isReleased, true)))
+        .groupBy(classes.id, classes.name)
+        .orderBy(asc(classes.name)),
+      db.select({
+        dueInWindow: sql<number>`count(*)`,
+        nextDueAt: sql<Date | null>`min(${assignments.dueAt})`,
+      })
+        .from(assignments)
+        .innerJoin(classes, eq(classes.id, assignments.classId))
+        .innerJoin(enrollments, eq(enrollments.classId, classes.id))
+        .leftJoin(submissions, and(eq(submissions.assignmentId, assignments.id), eq(submissions.studentId, viewer.id)))
+        .where(and(eq(enrollments.studentId, viewer.id), isNull(submissions.id), gte(assignments.dueAt, now), lte(assignments.dueAt, deadlineWindowEnd))),
     ]);
     const attendanceTotal = Number(attendance[0]?.total ?? 0);
     const attendancePresent = Number(attendance[0]?.present ?? 0);
@@ -272,6 +363,17 @@ router.get("/dashboard", requireAuth, async (req, res) => {
       todaySchedule,
       upcomingAssignments,
       recentAnnouncements,
+      productivity: {
+        progressByClass: progressByClass.map((progress) => ({
+          ...progress,
+          releasedEntries: Number(progress.releasedEntries ?? 0),
+          progressPercent: Number(progress.progressPercent ?? 0),
+        })),
+        upcomingDeadlineSummary: {
+          dueInWindow: Number(upcomingDeadlineSummary[0]?.dueInWindow ?? 0),
+          nextDueAt: upcomingDeadlineSummary[0]?.nextDueAt ?? null,
+        },
+      },
       studentDistribution: [],
       enrollmentTrend: [],
       recentActivity: [],
